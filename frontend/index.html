@@ -423,7 +423,7 @@
 </div>
 
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;apiBaseUrl&quot;: {&quot;editor&quot;: &quot;text&quot;, &quot;default&quot;: &quot;http://localhost:8000&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;API&quot;}, &quot;currency&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;default&quot;: &quot;USD&quot;, &quot;options&quot;: [&quot;USD&quot;, &quot;PAB&quot;], &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;General&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;apiBaseUrl&quot;: {&quot;editor&quot;: &quot;text&quot;, &quot;default&quot;: &quot;https://vianda-backend-production-8057.up.railway.app&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;API&quot;}, &quot;currency&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;default&quot;: &quot;USD&quot;, &quot;options&quot;: [&quot;USD&quot;, &quot;PAB&quot;], &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;General&quot;}}">
 const DAYS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 const MEAL_TYPES = [
   { key: 'desayuno', label: 'Desayuno' },
@@ -500,7 +500,7 @@ class Component extends DCLogic {
   };
 
   apiBase() {
-    return this.props.apiBaseUrl || 'http://localhost:8000';
+    return this.props.apiBaseUrl || 'https://vianda-backend-production-8057.up.railway.app';
   }
 
   async api(path, opts = {}) {
