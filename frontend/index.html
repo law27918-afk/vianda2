@@ -52,6 +52,9 @@
     <button onClick="{{ goIngredientes }}" style="{{ tabStyleIngredientes }}">
       <span style="{{ tabNumStyleIngredientes }}">5</span> Ingredientes
     </button>
+    <button onClick="{{ goComparar }}" style="{{ tabStyleComparar }}">
+      <span style="{{ tabNumStyleComparar }}">6</span> Comparar
+    </button>
   </nav>
 
   <main style="flex:1;padding:28px 24px 60px;max-width:1100px;width:100%;margin:0 auto;">
@@ -380,6 +383,42 @@
       </div>
     </sc-if>
 
+    <!-- ============ COMPARAR ============ -->
+    <sc-if value="{{ isComparar }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-family:'Nunito',sans-serif;font-weight:900;font-size:26px;margin:0 0 4px;">Comparar productos</h1>
+        <p style="color:oklch(55% 0.02 100);margin:0 0 22px;font-size:14px;">Busca un producto y compara marcas y precios entre Super99 y Riba Smith.</p>
+
+        <div style="display:flex;gap:10px;margin-bottom:20px;">
+          <input placeholder="Ej: leche, arroz, pollo..." value="{{ compareQuery }}" onChange="{{ setCompareQuery }}" onKeyDown="{{ onCompareKeyDown }}" style="flex:1;padding:11px 14px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;background:oklch(99% 0.006 85);" />
+          <button onClick="{{ runCompareSearch }}" disabled="{{ comparing }}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">{{ compareButtonLabel }}</button>
+        </div>
+
+        <sc-if value="{{ hasCompareResults }}" hint-placeholder-val="{{ false }}">
+          <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:14px;overflow:hidden;">
+            <div style="display:grid;grid-template-columns:2fr 1fr 1fr;padding:10px 16px;background:oklch(96% 0.02 85);font-weight:800;font-size:12px;color:oklch(45% 0.02 100);">
+              <div>Marca / producto</div>
+              <div>Tienda</div>
+              <div style="text-align:right;">Precio</div>
+            </div>
+            <sc-for list="{{ compareResults }}" as="cp" hint-placeholder-count="6">
+              <div style="{{ cp.rowStyle }}">
+                <div style="font-size:13px;font-weight:600;">{{ cp.name }}</div>
+                <div style="{{ cp.storeStyle }}">{{ cp.store }}</div>
+                <div style="{{ cp.priceStyle }}">${{ cp.priceLabel }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noCompareResults }}" hint-placeholder-val="{{ false }}">
+          <div style="text-align:center;padding:50px 20px;color:oklch(55% 0.02 100);font-size:14px;">Sin resultados para "{{ compareQuery }}".</div>
+        </sc-if>
+        <sc-if value="{{ noCompareSearchYet }}" hint-placeholder-val="{{ true }}">
+          <div style="text-align:center;padding:50px 20px;color:oklch(55% 0.02 100);font-size:14px;">Busca un producto para ver marcas y precios de Super99 y Riba Smith lado a lado.</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
   </main>
 </div>
 
@@ -454,6 +493,10 @@ class Component extends DCLogic {
     productQuery: '',
     productResults: [],
     searchingProducts: false,
+    compareQuery: '',
+    compareResults: [],
+    comparing: false,
+    compareSearched: false,
   };
 
   apiBase() {
@@ -531,6 +574,7 @@ class Component extends DCLogic {
   goPlan = () => this.setState({ view: 'plan' });
   goLista = () => this.setState({ view: 'lista' });
   goIngredientes = () => this.setState({ view: 'ingredientes' });
+  goComparar = () => this.setState({ view: 'comparar' });
 
   setNewIngredientName = e => this.setState(s => ({ newIngredient: { ...s.newIngredient, name: e.target.value } }));
   setNewIngredientUnit = e => this.setState(s => ({ newIngredient: { ...s.newIngredient, default_unit: e.target.value } }));
@@ -567,6 +611,21 @@ class Component extends DCLogic {
     if (r.ok && Array.isArray(r.data)) this.setState({ productResults: r.data });
     this.setState({ searchingProducts: false });
   };
+
+  setCompareQuery = e => this.setState({ compareQuery: e.target.value });
+
+  runCompareSearch = async () => {
+    const q = this.state.compareQuery.trim();
+    if (!q) return;
+    this.setState({ comparing: true });
+    const r = await this.api(`/ingredients/products/search?q=${encodeURIComponent(q)}`);
+    if (r.ok && Array.isArray(r.data)) {
+      this.setState({ compareResults: r.data, compareSearched: true });
+    }
+    this.setState({ comparing: false });
+  };
+
+  onCompareKeyDown = e => { if (e.key === 'Enter') this.runCompareSearch(); };
 
   linkProduct = async (ingredientId, storeProductId) => {
     const r = await this.api(`/ingredients/${ingredientId}/link/${storeProductId}`, { method: 'POST' });
@@ -855,6 +914,28 @@ class Component extends DCLogic {
       onLink: () => this.linkProduct(s.searchingIngredientId, p.id),
     }));
 
+    const sortedCompareResults = [...s.compareResults].sort((a, b) => a.price - b.price);
+    const cheapestComparePrice = sortedCompareResults.length ? sortedCompareResults[0].price : null;
+    const compareResults = sortedCompareResults.map(p => {
+      const isCheapest = p.price === cheapestComparePrice;
+      return {
+        id: p.id,
+        name: p.name,
+        store: p.store,
+        priceLabel: Number(p.price).toFixed(2),
+        rowStyle: {
+          display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', padding: '10px 16px',
+          borderTop: '1px solid oklch(94% 0.01 85)',
+          background: isCheapest ? 'oklch(96% 0.03 152)' : 'transparent',
+        },
+        storeStyle: { fontSize: '12px', fontWeight: 700, color: 'oklch(55% 0.02 100)' },
+        priceStyle: {
+          fontSize: '13px', fontWeight: 800, textAlign: 'right',
+          color: isCheapest ? 'oklch(40% 0.13 152)' : 'oklch(28% 0.03 145)',
+        },
+      };
+    });
+
     const members = (s.household && s.household.members || []).map(m => ({
       name: m.name,
       goalLabel: GOAL_LABELS[m.goal] || m.goal,
@@ -915,6 +996,15 @@ class Component extends DCLogic {
       productQuery: s.productQuery, setProductQuery: this.setProductQuery, searchingProducts: s.searchingProducts,
       searchButtonLabel: s.searchingProducts ? 'Buscando...' : 'Buscar',
       productResults,
+
+      isComparar: s.view === 'comparar', goComparar: this.goComparar,
+      tabStyleComparar: this.tabStyle(s.view === 'comparar'), tabNumStyleComparar: this.tabNumStyle(s.view === 'comparar'),
+      compareQuery: s.compareQuery, setCompareQuery: this.setCompareQuery, onCompareKeyDown: this.onCompareKeyDown,
+      runCompareSearch: this.runCompareSearch, comparing: s.comparing,
+      compareButtonLabel: s.comparing ? 'Buscando...' : 'Buscar',
+      compareResults, hasCompareResults: compareResults.length > 0,
+      noCompareResults: s.compareSearched && compareResults.length === 0,
+      noCompareSearchYet: !s.compareSearched,
     };
   }
 }
