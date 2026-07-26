@@ -40,6 +40,7 @@ def main(csv_path: str = None):
     df = df.rename(columns=COLUMN_MAP)
     df["sku"] = df["sku"].astype(str)
     df["scraped_at"] = pd.to_datetime(df["scraped_at"], errors="coerce")
+    df = df.drop_duplicates(subset=["store", "sku"], keep="last")
 
     records = df[list(COLUMN_MAP.values())].to_dict(orient="records")
 
