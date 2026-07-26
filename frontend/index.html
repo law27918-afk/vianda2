@@ -205,6 +205,17 @@
                 </div>
                 <div style="font-size:12px;color:oklch(55% 0.02 100);">{{ recipe.servingsLabel }}</div>
                 <div style="font-size:13px;color:oklch(40% 0.02 100);flex:1;">{{ recipe.ingredientsSummary }}</div>
+                <sc-for list="{{ recipe.ingredientLinkRows }}" as="row" hint-placeholder-count="2">
+                  <div style="display:flex;align-items:center;gap:6px;font-size:12px;">
+                    <div style="flex:1;color:oklch(45% 0.02 100);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ row.label }}</div>
+                    <select value="{{ row.value }}" onChange="{{ row.onChange }}" style="padding:4px 6px;border-radius:6px;border:1px solid oklch(88% 0.02 85);font-size:11px;max-width:110px;">
+                      <option value="">{{ row.linkedLabel }}</option>
+                      <sc-for list="{{ catalogIngredientOptions }}" as="opt" hint-placeholder-count="2">
+                        <option value="{{ opt.id }}">{{ opt.name }}</option>
+                      </sc-for>
+                    </select>
+                  </div>
+                </sc-for>
               </div>
             </sc-for>
           </div>
@@ -387,8 +398,8 @@ function parseIngredientLine(line) {
   const t = line.trim();
   if (!t) return null;
   const m = t.match(/^([\d.,]+)\s*([a-zA-Záéíóúñ]+)?\s+(.*)$/);
-  if (m) return { quantity: parseFloat(m[1].replace(',', '.')) || null, unit: m[2] || null, name: m[3].trim() };
-  return { quantity: null, unit: null, name: t };
+  if (m) return { raw_text: t, quantity: parseFloat(m[1].replace(',', '.')) || null, unit: m[2] || null, name: m[3].trim() };
+  return { raw_text: t, quantity: null, unit: null, name: t };
 }
 
 function ingredientsToText(ingredients) {
@@ -674,6 +685,15 @@ class Component extends DCLogic {
     if (r.ok) this.setState(s => ({ recipes: s.recipes.filter(x => x.id !== id) }));
   };
 
+  linkRecipeIngredient = async (recipeId, recipeIngredientId, ingredientId) => {
+    if (!ingredientId) return;
+    const r = await this.api(`/recipes/${recipeId}/ingredients/${recipeIngredientId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ingredient_id: ingredientId }),
+    });
+    if (r.ok) await this.loadRecipes();
+  };
+
   createPlan = async () => {
     const h = this.state.household;
     if (!h) { this.setState({ apiError: 'Configura tu hogar primero.' }); return; }
@@ -748,9 +768,18 @@ class Component extends DCLogic {
       .map(r => ({
         ...r,
         servingsLabel: `${r.servings || '?'} porciones base`,
-        ingredientsSummary: (r.ingredients || []).map(i => i.name || i.raw).filter(Boolean).slice(0, 5).join(', ') || 'Sin ingredientes listados',
+        ingredientsSummary: (r.ingredients || []).map(i => i.raw_text || i.name || i.raw).filter(Boolean).slice(0, 5).join(', ') || 'Sin ingredientes listados',
         onDelete: () => this.deleteRecipe(r.id),
+        ingredientLinkRows: (r.ingredients || []).map(ri => ({
+          id: ri.id,
+          label: ri.raw_text,
+          value: ri.ingredient_id || '',
+          linkedLabel: ri.ingredient_id ? 'vinculado' : 'sin vincular',
+          onChange: e => this.linkRecipeIngredient(r.id, ri.id, e.target.value),
+        })),
       }));
+
+    const catalogIngredientOptions = s.ingredients.map(i => ({ id: i.id, name: i.name }));
 
     const mealRows = MEAL_TYPES.map(mt => ({
       label: mt.label,
@@ -775,11 +804,11 @@ class Component extends DCLogic {
 
     const shoppingItems = s.shoppingItems.map(item => {
       const name = item.ingredient_name || item.name || 'Ingrediente';
-      const qty = item.quantity ?? item.amount ?? '';
+      const qty = item.quantity_needed ?? item.quantity ?? item.amount ?? '';
       const unit = item.unit || '';
       const cost = item.estimated_cost ?? item.cost ?? null;
       const store = item.cheaper_store || item.store || item.best_store || '—';
-      const checked = !!(item.checked ?? item.purchased);
+      const checked = !!(item.is_checked ?? item.checked ?? item.purchased);
       return {
         id: item.id,
         name, checked,
@@ -857,6 +886,7 @@ class Component extends DCLogic {
 
       recipes: s.recipes, recipeSearch: s.recipeSearch, setRecipeSearch: this.setRecipeSearch,
       filteredRecipes, hasFilteredRecipes: filteredRecipes.length > 0, noRecipesAtAll: s.recipes.length === 0,
+      catalogIngredientOptions,
       showAddRecipeForm: s.showAddRecipeForm, toggleAddRecipeForm: this.toggleAddRecipeForm,
       showImportForm: s.showImportForm, toggleImportForm: this.toggleImportForm,
       newRecipe: s.newRecipe, setNewRecipeName: this.setNewRecipeName, setNewRecipeServings: this.setNewRecipeServings,

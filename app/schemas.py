@@ -72,8 +72,18 @@ class IngredientCreate(IngredientBase):
     pass
 
 
+class IngredientProductLinkOut(BaseModel):
+    id: str
+    store_product_id: str
+    is_preferred: bool
+
+    class Config:
+        from_attributes = True
+
+
 class IngredientOut(IngredientBase):
     id: str
+    product_links: list[IngredientProductLinkOut] = []
 
     class Config:
         from_attributes = True
@@ -86,6 +96,10 @@ class RecipeIngredientBase(BaseModel):
     quantity: Optional[float] = None
     unit: Optional[str] = None
     ingredient_id: Optional[str] = None
+
+
+class RecipeIngredientLink(BaseModel):
+    ingredient_id: str
 
 
 class RecipeIngredientOut(RecipeIngredientBase):
@@ -165,9 +179,18 @@ class ShoppingListItemOut(BaseModel):
     cheapest_store_product_id: Optional[str] = None
     estimated_cost: Optional[float] = None
     is_checked: bool = False
+    ingredient_name: Optional[str] = None
+    store: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+    @staticmethod
+    def from_orm_item(item):
+        obj = ShoppingListItemOut.model_validate(item)
+        obj.ingredient_name = item.ingredient.name if item.ingredient else None
+        obj.store = item.cheapest_store_product.store if item.cheapest_store_product else None
+        return obj
 
 
 # ---------- Store products ----------

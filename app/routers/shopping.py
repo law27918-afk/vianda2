@@ -71,12 +71,13 @@ def generate_shopping_list(plan_id: str, db: Session = Depends(get_db)):
     db.commit()
     for item in items:
         db.refresh(item)
-    return items
+    return [schemas.ShoppingListItemOut.from_orm_item(item) for item in items]
 
 
 @router.get("/{plan_id}/shopping-list", response_model=list[schemas.ShoppingListItemOut])
 def get_shopping_list(plan_id: str, db: Session = Depends(get_db)):
-    return db.query(models.ShoppingListItem).filter(models.ShoppingListItem.plan_id == plan_id).all()
+    items = db.query(models.ShoppingListItem).filter(models.ShoppingListItem.plan_id == plan_id).all()
+    return [schemas.ShoppingListItemOut.from_orm_item(item) for item in items]
 
 
 class CheckPayload(BaseModel):

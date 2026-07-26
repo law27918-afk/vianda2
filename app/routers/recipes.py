@@ -110,6 +110,22 @@ def import_recipe(payload: schemas.RecipeImportRequest, db: Session = Depends(ge
     return recipe
 
 
+@router.patch("/{recipe_id}/ingredients/{recipe_ingredient_id}", response_model=schemas.RecipeIngredientOut)
+def link_recipe_ingredient(recipe_id: str, recipe_ingredient_id: str, payload: schemas.RecipeIngredientLink, db: Session = Depends(get_db)):
+    """Vincula una línea de ingrediente de receta (texto libre) a un ingrediente del catálogo propio."""
+    ri = (
+        db.query(models.RecipeIngredient)
+        .filter(models.RecipeIngredient.id == recipe_ingredient_id, models.RecipeIngredient.recipe_id == recipe_id)
+        .first()
+    )
+    if not ri:
+        raise HTTPException(404, "Ingrediente de receta no encontrado")
+    ri.ingredient_id = payload.ingredient_id
+    db.commit()
+    db.refresh(ri)
+    return ri
+
+
 @router.delete("/{recipe_id}")
 def delete_recipe(recipe_id: str, db: Session = Depends(get_db)):
     recipe = db.query(models.Recipe).get(recipe_id)
