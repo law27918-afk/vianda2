@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Nunito+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; font-family: 'Nunito Sans', sans-serif; -webkit-font-smoothing: antialiased; }
+  * { box-sizing: border-box; }
+  ::placeholder { color: oklch(60% 0.02 100); }
+  select, input, textarea, button { font-family: inherit; }
+  a { color: oklch(48% 0.13 152); }
+  a:hover { color: oklch(38% 0.11 152); }
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:oklch(97% 0.018 85);color:oklch(28% 0.03 145);display:flex;flex-direction:column;">
+
+  <header style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 24px;background:oklch(99% 0.006 85);border-bottom:1px solid oklch(90% 0.02 85);flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div style="width:38px;height:38px;border-radius:11px;background:oklch(48% 0.13 152);display:flex;align-items:center;justify-content:center;color:white;font-weight:900;font-size:18px;font-family:'Nunito',sans-serif;">V</div>
+      <div style="font-family:'Nunito',sans-serif;font-weight:900;font-size:22px;color:oklch(28% 0.03 145);">Vianda</div>
+      <div style="font-size:13px;color:oklch(55% 0.02 100);margin-left:4px;">meal planning para tu hogar</div>
+    </div>
+    <sc-if value="{{ apiError }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;align-items:center;gap:10px;background:oklch(94% 0.05 45);border:1px solid oklch(80% 0.1 45);color:oklch(35% 0.1 45);padding:8px 14px;border-radius:10px;font-size:13px;font-weight:600;">
+        <span>⚠ {{ apiError }}</span>
+        <button onClick="{{ dismissError }}" style="background:none;border:none;color:oklch(35% 0.1 45);cursor:pointer;font-weight:700;font-size:15px;">×</button>
+      </div>
+    </sc-if>
+  </header>
+
+  <nav style="display:flex;gap:8px;flex-wrap:wrap;padding:14px 24px;background:oklch(99% 0.006 85);border-bottom:1px solid oklch(90% 0.02 85);">
+    <button onClick="{{ goHogar }}" style="{{ tabStyleHogar }}">
+      <span style="{{ tabNumStyleHogar }}">1</span> Hogar
+    </button>
+    <button onClick="{{ goRecetas }}" style="{{ tabStyleRecetas }}">
+      <span style="{{ tabNumStyleRecetas }}">2</span> Recetas
+    </button>
+    <button onClick="{{ goPlan }}" style="{{ tabStylePlan }}">
+      <span style="{{ tabNumStylePlan }}">3</span> Plan semanal
+    </button>
+    <button onClick="{{ goLista }}" style="{{ tabStyleLista }}">
+      <span style="{{ tabNumStyleLista }}">4</span> Lista de compras
+    </button>
+    <button onClick="{{ goIngredientes }}" style="{{ tabStyleIngredientes }}">
+      <span style="{{ tabNumStyleIngredientes }}">5</span> Ingredientes
+    </button>
+  </nav>
+
+  <main style="flex:1;padding:28px 24px 60px;max-width:1100px;width:100%;margin:0 auto;">
+
+    <!-- ============ HOGAR ============ -->
+    <sc-if value="{{ isHogar }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <h1 style="font-family:'Nunito',sans-serif;font-weight:900;font-size:26px;margin:0 0 4px;">Tu hogar</h1>
+        <p style="color:oklch(55% 0.02 100);margin:0 0 22px;font-size:14px;">Configura el nombre, presupuesto y quiénes viven en casa.</p>
+
+        <sc-if value="{{ household }}" hint-placeholder-val="{{ false }}">
+          <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;padding:22px;margin-bottom:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px;">
+              <div>
+                <div style="font-family:'Nunito',sans-serif;font-weight:800;font-size:20px;">{{ household.name }}</div>
+                <div style="color:oklch(55% 0.02 100);font-size:14px;margin-top:4px;">Presupuesto mensual: <strong style="color:oklch(48% 0.13 152);">${{ household.budget }}</strong> · {{ household.num_people }} personas</div>
+              </div>
+              <button onClick="{{ toggleEditHousehold }}" style="background:oklch(94% 0.03 85);border:1px solid oklch(88% 0.02 85);border-radius:10px;padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer;color:oklch(28% 0.03 145);">{{ editHouseholdLabel }}</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ showHouseholdForm }}" hint-placeholder-val="{{ true }}">
+          <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;padding:22px;margin-bottom:24px;">
+            <div style="font-weight:800;font-size:16px;margin-bottom:16px;font-family:'Nunito',sans-serif;">{{ householdFormTitle }}</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);">Nombre del hogar
+                <input type="text" value="{{ householdForm.name }}" onChange="{{ setHouseholdName }}" placeholder="Ej: Casa Rodríguez" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);">Presupuesto mensual (USD)
+                <input type="number" min="0" value="{{ householdForm.budget }}" onChange="{{ setHouseholdBudget }}" placeholder="600" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);">Cantidad de personas
+                <input type="number" min="1" max="4" value="{{ householdForm.num_people }}" onChange="{{ setHouseholdNumPeople }}" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+              </label>
+            </div>
+            <button onClick="{{ saveHousehold }}" disabled="{{ savingHousehold }}" style="margin-top:16px;background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">{{ saveHouseholdLabel }}</button>
+          </div>
+        </sc-if>
+
+        <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;padding:22px;">
+          <div style="font-weight:800;font-size:16px;margin-bottom:4px;font-family:'Nunito',sans-serif;">Miembros del hogar</div>
+          <div style="color:oklch(55% 0.02 100);font-size:13px;margin-bottom:16px;">Cada persona con su objetivo nutricional.</div>
+
+          <sc-if value="{{ hasMembers }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+              <sc-for list="{{ members }}" as="member" hint-placeholder-count="2">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;background:oklch(97% 0.018 85);border-radius:10px;">
+                  <div style="font-weight:700;font-size:14px;">{{ member.name }}</div>
+                  <div style="font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;background:{{ member.goalBg }};color:{{ member.goalColor }};">{{ member.goalLabel }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);flex:1;min-width:140px;">Nombre
+              <input type="text" value="{{ newMember.name }}" onChange="{{ setNewMemberName }}" placeholder="Ej: Ana" style="padding:9px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);">Objetivo
+              <select value="{{ newMember.goal }}" onChange="{{ setNewMemberGoal }}" style="padding:9px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;">
+                <option value="deficit">Déficit</option>
+                <option value="mantenimiento">Mantenimiento</option>
+                <option value="superavit">Superávit</option>
+              </select>
+            </label>
+            <button onClick="{{ addMember }}" disabled="{{ !household }}" style="background:oklch(68% 0.17 55);color:white;border:none;border-radius:10px;padding:10px 18px;font-weight:800;font-size:14px;cursor:pointer;white-space:nowrap;">+ Añadir</button>
+          </div>
+          <sc-if value="{{ !household }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:oklch(55% 0.02 100);margin-top:8px;">Guarda el hogar primero para poder añadir miembros.</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ============ RECETAS ============ -->
+    <sc-if value="{{ isRecetas }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:14px;margin-bottom:20px;">
+          <div>
+            <h1 style="font-family:'Nunito',sans-serif;font-weight:900;font-size:26px;margin:0 0 4px;">Recetas</h1>
+            <p style="color:oklch(55% 0.02 100);margin:0;font-size:14px;">Tu biblioteca de recetas guardadas.</p>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button onClick="{{ toggleImportForm }}" style="background:oklch(94% 0.03 85);border:1px solid oklch(88% 0.02 85);border-radius:10px;padding:10px 16px;font-weight:700;font-size:13px;cursor:pointer;color:oklch(28% 0.03 145);">Importar desde URL</button>
+            <button onClick="{{ toggleAddRecipeForm }}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:10px 16px;font-weight:800;font-size:13px;cursor:pointer;">+ Añadir receta manual</button>
+          </div>
+        </div>
+
+        <sc-if value="{{ showImportForm }}" hint-placeholder-val="{{ false }}">
+          <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;padding:22px;margin-bottom:20px;">
+            <div style="font-weight:800;font-size:16px;margin-bottom:14px;font-family:'Nunito',sans-serif;">Importar receta desde URL</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+              <input type="url" value="{{ importUrl }}" onChange="{{ setImportUrl }}" placeholder="https://ejemplo.com/receta" style="flex:1;min-width:220px;padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+              <button onClick="{{ runImport }}" disabled="{{ importing }}" style="background:oklch(68% 0.17 55);color:white;border:none;border-radius:10px;padding:10px 18px;font-weight:800;font-size:14px;cursor:pointer;">{{ importButtonLabel }}</button>
+            </div>
+
+            <sc-if value="{{ importDraft }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:18px;padding-top:18px;border-top:1px solid oklch(90% 0.02 85);">
+                <div style="font-size:13px;color:oklch(55% 0.02 100);margin-bottom:12px;">Revisa y edita antes de guardar:</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:14px;">
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);">Nombre
+                    <input type="text" value="{{ importDraft.name }}" onChange="{{ setImportDraftName }}" style="padding:9px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+                  </label>
+                  <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);">Porciones base
+                    <input type="number" min="1" value="{{ importDraft.servings }}" onChange="{{ setImportDraftServings }}" style="padding:9px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+                  </label>
+                </div>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:14px;">Instrucciones
+                  <textarea value="{{ importDraft.instructions }}" onChange="{{ setImportDraftInstructions }}" rows="4" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;"></textarea>
+                </label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:16px;">Ingredientes (uno por línea, ej: "200g pollo")
+                  <textarea value="{{ importDraft.ingredientsText }}" onChange="{{ setImportDraftIngredients }}" rows="5" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;"></textarea>
+                </label>
+                <button onClick="{{ saveImportedRecipe }}" disabled="{{ savingRecipe }}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">{{ saveRecipeLabel }}</button>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ showAddRecipeForm }}" hint-placeholder-val="{{ false }}">
+          <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;padding:22px;margin-bottom:20px;">
+            <div style="font-weight:800;font-size:16px;margin-bottom:14px;font-family:'Nunito',sans-serif;">Nueva receta</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:14px;">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);">Nombre
+                <input type="text" value="{{ newRecipe.name }}" onChange="{{ setNewRecipeName }}" placeholder="Ej: Arroz con pollo" style="padding:9px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);">Porciones base
+                <input type="number" min="1" value="{{ newRecipe.servings }}" onChange="{{ setNewRecipeServings }}" style="padding:9px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+              </label>
+            </div>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:14px;">Instrucciones
+              <textarea value="{{ newRecipe.instructions }}" onChange="{{ setNewRecipeInstructions }}" rows="4" placeholder="Paso a paso..." style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;"></textarea>
+            </label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:16px;">Ingredientes (uno por línea, ej: "200g pollo")
+              <textarea value="{{ newRecipe.ingredientsText }}" onChange="{{ setNewRecipeIngredients }}" rows="5" placeholder="200g pollo&#10;1 taza arroz&#10;2 cdas aceite" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;"></textarea>
+            </label>
+            <button onClick="{{ saveNewRecipe }}" disabled="{{ savingRecipe }}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">{{ saveRecipeLabel }}</button>
+          </div>
+        </sc-if>
+
+        <input type="text" value="{{ recipeSearch }}" onChange="{{ setRecipeSearch }}" placeholder="Buscar receta..." style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;margin-bottom:18px;background:oklch(99% 0.006 85);" />
+
+        <sc-if value="{{ hasFilteredRecipes }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;">
+            <sc-for list="{{ filteredRecipes }}" as="recipe" hint-placeholder-count="3">
+              <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                  <div style="font-weight:800;font-size:15px;font-family:'Nunito',sans-serif;">{{ recipe.name }}</div>
+                  <button onClick="{{ recipe.onDelete }}" style="background:none;border:none;color:oklch(60% 0.02 100);cursor:pointer;font-size:16px;line-height:1;padding:0;">🗑</button>
+                </div>
+                <div style="font-size:12px;color:oklch(55% 0.02 100);">{{ recipe.servingsLabel }}</div>
+                <div style="font-size:13px;color:oklch(40% 0.02 100);flex:1;">{{ recipe.ingredientsSummary }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noRecipesAtAll }}" hint-placeholder-val="{{ false }}">
+          <div style="text-align:center;padding:50px 20px;color:oklch(55% 0.02 100);font-size:14px;">Aún no hay recetas guardadas. Añade una manualmente o impórtala desde una URL.</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- ============ PLAN SEMANAL ============ -->
+    <sc-if value="{{ isPlan }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:14px;margin-bottom:20px;">
+          <div>
+            <h1 style="font-family:'Nunito',sans-serif;font-weight:900;font-size:26px;margin:0 0 4px;">Plan semanal</h1>
+            <p style="color:oklch(55% 0.02 100);margin:0;font-size:14px;">Semana del {{ weekStartLabel }}.</p>
+          </div>
+          <sc-if value="{{ !planId }}" hint-placeholder-val="{{ true }}">
+            <button onClick="{{ createPlan }}" disabled="{{ creatingPlan }}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">{{ createPlanLabel }}</button>
+          </sc-if>
+        </div>
+
+        <sc-if value="{{ noRecipesForPlan }}" hint-placeholder-val="{{ false }}">
+          <div style="background:oklch(96% 0.04 55);border:1px solid oklch(85% 0.08 55);border-radius:12px;padding:14px 18px;font-size:13px;color:oklch(40% 0.1 55);margin-bottom:16px;">Añade recetas primero en la pestaña Recetas para poder asignarlas al plan.</div>
+        </sc-if>
+
+        <sc-if value="{{ planId }}" hint-placeholder-val="{{ false }}">
+          <div style="overflow-x:auto;border-radius:16px;border:1px solid oklch(90% 0.02 85);">
+            <div style="display:grid;grid-template-columns:110px repeat(7,minmax(160px,1fr));min-width:1280px;">
+              <div style="background:oklch(99% 0.006 85);padding:12px;font-weight:800;font-size:13px;border-bottom:1px solid oklch(90% 0.02 85);"></div>
+              <sc-for list="{{ dayHeaders }}" as="day" hint-placeholder-count="7">
+                <div style="background:oklch(99% 0.006 85);padding:12px;font-weight:800;font-size:13px;text-align:center;border-bottom:1px solid oklch(90% 0.02 85);border-left:1px solid oklch(90% 0.02 85);font-family:'Nunito',sans-serif;">{{ day }}</div>
+              </sc-for>
+
+              <sc-for list="{{ mealRows }}" as="row" hint-placeholder-count="4">
+                <div style="background:oklch(97% 0.018 85);padding:12px;font-weight:800;font-size:13px;display:flex;align-items:center;border-bottom:1px solid oklch(90% 0.02 85);">{{ row.label }}</div>
+                <sc-for list="{{ row.cells }}" as="cell" hint-placeholder-count="7">
+                  <div style="padding:10px;border-bottom:1px solid oklch(90% 0.02 85);border-left:1px solid oklch(90% 0.02 85);background:oklch(99% 0.006 85);display:flex;flex-direction:column;gap:6px;">
+                    <sc-if value="{{ cell.assigned }}" hint-placeholder-val="{{ false }}">
+                      <div style="background:oklch(94% 0.04 152);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:4px;">
+                        <div style="display:flex;justify-content:space-between;gap:6px;align-items:flex-start;">
+                          <div style="font-size:12px;font-weight:800;color:oklch(30% 0.08 152);">{{ cell.recipeName }}</div>
+                          <button onClick="{{ cell.onRemove }}" style="background:none;border:none;color:oklch(45% 0.08 152);cursor:pointer;font-size:13px;line-height:1;padding:0;">×</button>
+                        </div>
+                        <div style="font-size:11px;color:oklch(40% 0.05 152);">{{ cell.servingsLabel }}</div>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ !cell.assigned }}" hint-placeholder-val="{{ true }}">
+                      <select value="{{ cell.draftRecipeId }}" onChange="{{ cell.onChangeRecipe }}" style="padding:6px 8px;border-radius:8px;border:1px solid oklch(88% 0.02 85);font-size:12px;">
+                        <option value="">Elegir receta...</option>
+                        <sc-for list="{{ recipes }}" as="r" hint-placeholder-count="3">
+                          <option value="{{ r.id }}">{{ r.name }}</option>
+                        </sc-for>
+                      </select>
+                      <div style="display:flex;gap:6px;align-items:center;">
+                        <input type="number" min="1" value="{{ cell.draftServings }}" onChange="{{ cell.onChangeServings }}" style="width:56px;padding:6px 8px;border-radius:8px;border:1px solid oklch(88% 0.02 85);font-size:12px;" />
+                        <button onClick="{{ cell.onAssign }}" style="background:oklch(68% 0.17 55);color:white;border:none;border-radius:8px;padding:6px 10px;font-weight:800;font-size:11px;cursor:pointer;">Asignar</button>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- ============ LISTA DE COMPRAS ============ -->
+    <sc-if value="{{ isLista }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:14px;margin-bottom:20px;">
+          <div>
+            <h1 style="font-family:'Nunito',sans-serif;font-weight:900;font-size:26px;margin:0 0 4px;">Lista de compras</h1>
+            <p style="color:oklch(55% 0.02 100);margin:0;font-size:14px;">Generada a partir de tu plan semanal.</p>
+          </div>
+          <sc-if value="{{ planId }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ generateList }}" disabled="{{ generatingList }}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">{{ generateListLabel }}</button>
+          </sc-if>
+        </div>
+
+        <sc-if value="{{ !planId }}" hint-placeholder-val="{{ true }}">
+          <div style="background:oklch(96% 0.04 55);border:1px solid oklch(85% 0.08 55);border-radius:12px;padding:14px 18px;font-size:13px;color:oklch(40% 0.1 55);">Primero crea un plan semanal en la pestaña anterior.</div>
+        </sc-if>
+
+        <sc-if value="{{ hasShoppingItems }}" hint-placeholder-val="{{ false }}">
+          <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;overflow:hidden;">
+            <div style="display:grid;grid-template-columns:34px 1.6fr 1fr 1fr 1.1fr;padding:12px 16px;background:oklch(97% 0.018 85);font-size:12px;font-weight:800;color:oklch(50% 0.02 100);">
+              <div></div><div>Ingrediente</div><div>Cantidad</div><div>Costo est.</div><div>Más barato en</div>
+            </div>
+            <sc-for list="{{ shoppingItems }}" as="item" hint-placeholder-count="5">
+              <div style="{{ item.rowStyle }}">
+                <input type="checkbox" checked="{{ item.checked }}" onChange="{{ item.onToggle }}" style="width:18px;height:18px;cursor:pointer;" />
+                <div style="{{ item.textStyle }}">{{ item.name }}</div>
+                <div style="{{ item.textStyle }}">{{ item.quantityLabel }}</div>
+                <div style="{{ item.textStyle }}">{{ item.costLabel }}</div>
+                <div style="{{ item.storeStyle }}">{{ item.store }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noShoppingItems }}" hint-placeholder-val="{{ false }}">
+          <div style="text-align:center;padding:50px 20px;color:oklch(55% 0.02 100);font-size:14px;">Aún no hay lista generada para esta semana.</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- ============ INGREDIENTES ============ -->
+    <sc-if value="{{ isIngredientes }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <h1 style="font-family:'Nunito',sans-serif;font-weight:900;font-size:26px;margin:0 0 4px;">Ingredientes</h1>
+        <p style="color:oklch(55% 0.02 100);margin:0 0 22px;font-size:14px;">Vincula cada ingrediente propio a un producto real de Super99 o Riba Smith para que la lista de compras pueda calcular el precio más barato.</p>
+
+        <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;padding:18px;margin-bottom:20px;">
+          <div style="font-weight:800;font-size:14px;margin-bottom:10px;">Nuevo ingrediente</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <input placeholder="Ej: leche entera" value="{{ newIngredient.name }}" onChange="{{ setNewIngredientName }}" style="flex:1;min-width:180px;padding:10px 12px;border-radius:9px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+            <select value="{{ newIngredient.default_unit }}" onChange="{{ setNewIngredientUnit }}" style="padding:10px 12px;border-radius:9px;border:1px solid oklch(88% 0.02 85);font-size:14px;">
+              <option value="g">gramos (g)</option>
+              <option value="ml">mililitros (ml)</option>
+              <option value="unidad">unidad</option>
+            </select>
+            <button onClick="{{ addIngredient }}" disabled="{{ savingIngredient }}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:9px;padding:10px 18px;font-weight:800;font-size:14px;cursor:pointer;">{{ addIngredientLabel }}</button>
+          </div>
+        </div>
+
+        <sc-if value="{{ hasIngredients }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <sc-for list="{{ ingredientRows }}" as="ing" hint-placeholder-count="4">
+              <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:14px;padding:14px 18px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+                  <div>
+                    <div style="font-weight:800;font-size:15px;">{{ ing.name }}</div>
+                    <div style="font-size:12px;color:oklch(55% 0.02 100);">unidad: {{ ing.default_unit }} · {{ ing.linksLabel }}</div>
+                  </div>
+                  <button onClick="{{ ing.onToggleSearch }}" style="background:transparent;border:1px solid oklch(48% 0.13 152);color:oklch(40% 0.11 152);border-radius:8px;padding:7px 14px;font-weight:700;font-size:13px;cursor:pointer;">{{ ing.searchToggleLabel }}</button>
+                </div>
+
+                <sc-if value="{{ ing.isSearching }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:12px;border-top:1px solid oklch(92% 0.015 85);padding-top:12px;">
+                    <div style="display:flex;gap:8px;margin-bottom:10px;">
+                      <input placeholder="Buscar producto (ej: leche)" value="{{ productQuery }}" onChange="{{ setProductQuery }}" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid oklch(88% 0.02 85);font-size:13px;" />
+                      <button onClick="{{ ing.onSearch }}" disabled="{{ searchingProducts }}" style="background:oklch(93% 0.02 85);border:1px solid oklch(85% 0.02 85);border-radius:8px;padding:9px 16px;font-weight:700;font-size:13px;cursor:pointer;">{{ searchButtonLabel }}</button>
+                    </div>
+                    <sc-for list="{{ productResults }}" as="p" hint-placeholder-count="3">
+                      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid oklch(94% 0.01 85);font-size:13px;">
+                        <div style="flex:1;">{{ p.name }} <span style="color:oklch(55% 0.02 100);">({{ p.store }})</span></div>
+                        <div style="font-weight:800;margin:0 12px;">${{ p.priceLabel }}</div>
+                        <button onClick="{{ p.onLink }}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:7px;padding:6px 12px;font-weight:700;font-size:12px;cursor:pointer;">Vincular</button>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noIngredients }}" hint-placeholder-val="{{ false }}">
+          <div style="text-align:center;padding:50px 20px;color:oklch(55% 0.02 100);font-size:14px;">Aún no has creado ningún ingrediente.</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+  </main>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;apiBaseUrl&quot;: {&quot;editor&quot;: &quot;text&quot;, &quot;default&quot;: &quot;http://localhost:8000&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;API&quot;}, &quot;currency&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;default&quot;: &quot;USD&quot;, &quot;options&quot;: [&quot;USD&quot;, &quot;PAB&quot;], &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;General&quot;}}">
+const DAYS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+const MEAL_TYPES = [
+  { key: 'desayuno', label: 'Desayuno' },
+  { key: 'almuerzo', label: 'Almuerzo' },
+  { key: 'cena', label: 'Cena' },
+  { key: 'snack', label: 'Snack' },
+];
+const GOAL_LABELS = { deficit: 'Déficit', mantenimiento: 'Mantenimiento', superavit: 'Superávit' };
+
+function parseIngredientLine(line) {
+  const t = line.trim();
+  if (!t) return null;
+  const m = t.match(/^([\d.,]+)\s*([a-zA-Záéíóúñ]+)?\s+(.*)$/);
+  if (m) return { quantity: parseFloat(m[1].replace(',', '.')) || null, unit: m[2] || null, name: m[3].trim() };
+  return { quantity: null, unit: null, name: t };
+}
+
+function ingredientsToText(ingredients) {
+  if (!Array.isArray(ingredients)) return '';
+  return ingredients.map(i => {
+    const parts = [];
+    if (i.quantity != null) parts.push(i.quantity);
+    if (i.unit) parts.push(i.unit);
+    parts.push(i.name || i.raw || '');
+    return parts.join(' ').trim();
+  }).join('\n');
+}
+
+function getMonday(d) {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(date.setDate(diff));
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
+class Component extends DCLogic {
+  state = {
+    view: 'hogar',
+    apiError: null,
+    household: null,
+    householdForm: { name: '', budget: '', num_people: 2 },
+    showHouseholdForm: true,
+    savingHousehold: false,
+    newMember: { name: '', goal: 'mantenimiento' },
+    recipes: [],
+    recipeSearch: '',
+    showAddRecipeForm: false,
+    showImportForm: false,
+    newRecipe: { name: '', servings: 4, instructions: '', ingredientsText: '' },
+    importUrl: '',
+    importDraft: null,
+    importing: false,
+    savingRecipe: false,
+    planId: null,
+    weekStart: getMonday(new Date()).toISOString().slice(0, 10),
+    meals: [],
+    creatingPlan: false,
+    cellDrafts: {},
+    shoppingItems: [],
+    generatingList: false,
+    ingredients: [],
+    newIngredient: { name: '', default_unit: 'g' },
+    savingIngredient: false,
+    searchingIngredientId: null,
+    productQuery: '',
+    productResults: [],
+    searchingProducts: false,
+  };
+
+  apiBase() {
+    return this.props.apiBaseUrl || 'http://localhost:8000';
+  }
+
+  async api(path, opts = {}) {
+    try {
+      const res = await fetch(this.apiBase() + path, {
+        headers: { 'Content-Type': 'application/json' },
+        ...opts,
+      });
+      if (!res.ok) {
+        let msg = `Error ${res.status}`;
+        try { const j = await res.json(); msg = j.detail || j.message || msg; } catch (e) {}
+        this.setState({ apiError: msg });
+        return { ok: false, error: msg };
+      }
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : null;
+      return { ok: true, data };
+    } catch (e) {
+      this.setState({ apiError: 'No se pudo conectar con el servidor (' + this.apiBase() + '). ¿Está corriendo la API?' });
+      return { ok: false, error: e.message };
+    }
+  }
+
+  componentDidMount() {
+    const hid = localStorage.getItem('vianda_household_id');
+    const pid = localStorage.getItem('vianda_plan_id');
+    this.loadHouseholds(hid);
+    this.loadRecipes();
+    this.loadIngredients();
+    if (pid) { this.setState({ planId: pid }); this.loadPlan(pid); this.loadShoppingList(pid); }
+  }
+
+  async loadIngredients() {
+    const r = await this.api('/ingredients');
+    if (r.ok && Array.isArray(r.data)) this.setState({ ingredients: r.data });
+  }
+
+  async loadHouseholds(preferId) {
+    const r = await this.api('/households');
+    if (r.ok && Array.isArray(r.data)) {
+      let h = r.data.find(x => String(x.id) === String(preferId)) || r.data[0] || null;
+      if (h) {
+        this.setState({
+          household: h,
+          showHouseholdForm: false,
+          householdForm: { name: h.name || '', budget: h.budget ?? '', num_people: h.num_people ?? 2 },
+        });
+        localStorage.setItem('vianda_household_id', h.id);
+      }
+    }
+  }
+
+  async loadRecipes() {
+    const r = await this.api('/recipes');
+    if (r.ok && Array.isArray(r.data)) this.setState({ recipes: r.data });
+  }
+
+  async loadPlan(id) {
+    const r = await this.api(`/plans/${id}`);
+    if (r.ok && r.data) this.setState({ meals: r.data.meals || [] });
+  }
+
+  async loadShoppingList(id) {
+    const r = await this.api(`/plans/${id}/shopping-list`);
+    if (r.ok && Array.isArray(r.data)) this.setState({ shoppingItems: r.data });
+  }
+
+  dismissError = () => this.setState({ apiError: null });
+  goHogar = () => this.setState({ view: 'hogar' });
+  goRecetas = () => this.setState({ view: 'recetas' });
+  goPlan = () => this.setState({ view: 'plan' });
+  goLista = () => this.setState({ view: 'lista' });
+  goIngredientes = () => this.setState({ view: 'ingredientes' });
+
+  setNewIngredientName = e => this.setState(s => ({ newIngredient: { ...s.newIngredient, name: e.target.value } }));
+  setNewIngredientUnit = e => this.setState(s => ({ newIngredient: { ...s.newIngredient, default_unit: e.target.value } }));
+
+  addIngredient = async () => {
+    const n = this.state.newIngredient;
+    if (!n.name.trim()) return;
+    this.setState({ savingIngredient: true });
+    const r = await this.api('/ingredients', { method: 'POST', body: JSON.stringify(n) });
+    if (r.ok) {
+      this.setState(s => ({
+        ingredients: [...s.ingredients, r.data || { ...n, id: Date.now().toString(), product_links: [] }],
+        newIngredient: { name: '', default_unit: 'g' },
+      }));
+    }
+    this.setState({ savingIngredient: false });
+  };
+
+  toggleIngredientSearch = (ingredientId) => {
+    this.setState(s => ({
+      searchingIngredientId: s.searchingIngredientId === ingredientId ? null : ingredientId,
+      productQuery: '',
+      productResults: [],
+    }));
+  };
+
+  setProductQuery = e => this.setState({ productQuery: e.target.value });
+
+  searchProducts = async () => {
+    const q = this.state.productQuery.trim();
+    if (!q) return;
+    this.setState({ searchingProducts: true });
+    const r = await this.api(`/ingredients/products/search?q=${encodeURIComponent(q)}`);
+    if (r.ok && Array.isArray(r.data)) this.setState({ productResults: r.data });
+    this.setState({ searchingProducts: false });
+  };
+
+  linkProduct = async (ingredientId, storeProductId) => {
+    const r = await this.api(`/ingredients/${ingredientId}/link/${storeProductId}`, { method: 'POST' });
+    if (r.ok) {
+      await this.loadIngredients();
+      this.setState({ searchingIngredientId: null, productQuery: '', productResults: [] });
+    }
+  };
+
+  toggleEditHousehold = () => this.setState(s => ({ showHouseholdForm: !s.showHouseholdForm }));
+  setHouseholdName = e => this.setState(s => ({ householdForm: { ...s.householdForm, name: e.target.value } }));
+  setHouseholdBudget = e => this.setState(s => ({ householdForm: { ...s.householdForm, budget: e.target.value } }));
+  setHouseholdNumPeople = e => this.setState(s => ({ householdForm: { ...s.householdForm, num_people: e.target.value } }));
+
+  saveHousehold = async () => {
+    this.setState({ savingHousehold: true });
+    const f = this.state.householdForm;
+    const body = { name: f.name, budget: parseFloat(f.budget) || 0, num_people: parseInt(f.num_people) || 1 };
+    let r;
+    if (this.state.household) {
+      r = await this.api(`/households/${this.state.household.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      r = await this.api('/households', { method: 'POST', body: JSON.stringify(body) });
+    }
+    if (r.ok && r.data) {
+      localStorage.setItem('vianda_household_id', r.data.id);
+      this.setState({ household: r.data, showHouseholdForm: false });
+    }
+    this.setState({ savingHousehold: false });
+  };
+
+  setNewMemberName = e => this.setState(s => ({ newMember: { ...s.newMember, name: e.target.value } }));
+  setNewMemberGoal = e => this.setState(s => ({ newMember: { ...s.newMember, goal: e.target.value } }));
+
+  addMember = async () => {
+    const h = this.state.household;
+    if (!h || !this.state.newMember.name.trim()) return;
+    const r = await this.api(`/households/${h.id}/members`, { method: 'POST', body: JSON.stringify(this.state.newMember) });
+    if (r.ok) {
+      const members = [...(h.members || []), r.data && r.data.name ? r.data : { ...this.state.newMember }];
+      this.setState({ household: { ...h, members }, newMember: { name: '', goal: 'mantenimiento' } });
+    }
+  };
+
+  setRecipeSearch = e => this.setState({ recipeSearch: e.target.value });
+  toggleAddRecipeForm = () => this.setState(s => ({ showAddRecipeForm: !s.showAddRecipeForm, showImportForm: false }));
+  toggleImportForm = () => this.setState(s => ({ showImportForm: !s.showImportForm, showAddRecipeForm: false }));
+
+  setNewRecipeName = e => this.setState(s => ({ newRecipe: { ...s.newRecipe, name: e.target.value } }));
+  setNewRecipeServings = e => this.setState(s => ({ newRecipe: { ...s.newRecipe, servings: e.target.value } }));
+  setNewRecipeInstructions = e => this.setState(s => ({ newRecipe: { ...s.newRecipe, instructions: e.target.value } }));
+  setNewRecipeIngredients = e => this.setState(s => ({ newRecipe: { ...s.newRecipe, ingredientsText: e.target.value } }));
+
+  saveNewRecipe = async () => {
+    const n = this.state.newRecipe;
+    if (!n.name.trim()) return;
+    this.setState({ savingRecipe: true });
+    const ingredients = n.ingredientsText.split('\n').map(parseIngredientLine).filter(Boolean);
+    const body = { name: n.name, servings: parseInt(n.servings) || 1, instructions: n.instructions, ingredients };
+    const r = await this.api('/recipes', { method: 'POST', body: JSON.stringify(body) });
+    if (r.ok) {
+      this.setState(s => ({
+        recipes: [...s.recipes, r.data || body],
+        newRecipe: { name: '', servings: 4, instructions: '', ingredientsText: '' },
+        showAddRecipeForm: false,
+      }));
+    }
+    this.setState({ savingRecipe: false });
+  };
+
+  setImportUrl = e => this.setState({ importUrl: e.target.value });
+
+  runImport = async () => {
+    if (!this.state.importUrl.trim()) return;
+    this.setState({ importing: true, importDraft: null });
+    const r = await this.api('/recipes/import', { method: 'POST', body: JSON.stringify({ url: this.state.importUrl }) });
+    if (r.ok && r.data) {
+      const d = r.data;
+      this.setState({
+        importDraft: {
+          name: d.name || '',
+          servings: d.servings || 4,
+          instructions: d.instructions || '',
+          ingredientsText: ingredientsToText(d.ingredients),
+        },
+      });
+    }
+    this.setState({ importing: false });
+  };
+
+  setImportDraftName = e => this.setState(s => ({ importDraft: { ...s.importDraft, name: e.target.value } }));
+  setImportDraftServings = e => this.setState(s => ({ importDraft: { ...s.importDraft, servings: e.target.value } }));
+  setImportDraftInstructions = e => this.setState(s => ({ importDraft: { ...s.importDraft, instructions: e.target.value } }));
+  setImportDraftIngredients = e => this.setState(s => ({ importDraft: { ...s.importDraft, ingredientsText: e.target.value } }));
+
+  saveImportedRecipe = async () => {
+    const d = this.state.importDraft;
+    if (!d || !d.name.trim()) return;
+    this.setState({ savingRecipe: true });
+    const ingredients = d.ingredientsText.split('\n').map(parseIngredientLine).filter(Boolean);
+    const body = { name: d.name, servings: parseInt(d.servings) || 1, instructions: d.instructions, ingredients };
+    const r = await this.api('/recipes', { method: 'POST', body: JSON.stringify(body) });
+    if (r.ok) {
+      this.setState(s => ({
+        recipes: [...s.recipes, r.data || body],
+        importDraft: null,
+        importUrl: '',
+        showImportForm: false,
+      }));
+    }
+    this.setState({ savingRecipe: false });
+  };
+
+  deleteRecipe = async (id) => {
+    const r = await this.api(`/recipes/${id}`, { method: 'DELETE' });
+    if (r.ok) this.setState(s => ({ recipes: s.recipes.filter(x => x.id !== id) }));
+  };
+
+  createPlan = async () => {
+    const h = this.state.household;
+    if (!h) { this.setState({ apiError: 'Configura tu hogar primero.' }); return; }
+    this.setState({ creatingPlan: true });
+    const r = await this.api('/plans', { method: 'POST', body: JSON.stringify({ household_id: h.id, week_start: this.state.weekStart }) });
+    if (r.ok && r.data) {
+      localStorage.setItem('vianda_plan_id', r.data.id);
+      this.setState({ planId: r.data.id, meals: r.data.meals || [] });
+    }
+    this.setState({ creatingPlan: false });
+  };
+
+  cellKey(dayIdx, mealKey) { return `${dayIdx}-${mealKey}`; }
+
+  setCellDraftRecipe = (key, val) => this.setState(s => ({ cellDrafts: { ...s.cellDrafts, [key]: { ...(s.cellDrafts[key] || {}), recipeId: val } } }));
+  setCellDraftServings = (key, val) => this.setState(s => ({ cellDrafts: { ...s.cellDrafts, [key]: { ...(s.cellDrafts[key] || {}), servings: val } } }));
+
+  assignMeal = async (dayIdx, mealKey) => {
+    const key = this.cellKey(dayIdx, mealKey);
+    const draft = this.state.cellDrafts[key] || {};
+    if (!draft.recipeId) return;
+    const servings = draft.servings || (this.state.household ? this.state.household.num_people : 2);
+    const body = { day: dayIdx, meal_type: mealKey, recipe_id: draft.recipeId, servings_override: parseInt(servings) };
+    const r = await this.api(`/plans/${this.state.planId}/meals`, { method: 'POST', body: JSON.stringify(body) });
+    if (r.ok) {
+      const meal = r.data || { id: Date.now(), ...body };
+      this.setState(s => ({ meals: [...s.meals, meal] }));
+    }
+  };
+
+  removeMeal = async (mealId) => {
+    const r = await this.api(`/plans/${this.state.planId}/meals/${mealId}`, { method: 'DELETE' });
+    if (r.ok) this.setState(s => ({ meals: s.meals.filter(m => m.id !== mealId) }));
+  };
+
+  generateList = async () => {
+    if (!this.state.planId) return;
+    this.setState({ generatingList: true });
+    await this.api(`/plans/${this.state.planId}/shopping-list/generate`, { method: 'POST' });
+    await this.loadShoppingList(this.state.planId);
+    this.setState({ generatingList: false });
+  };
+
+  toggleItemChecked = async (item) => {
+    const newVal = !item.checked;
+    this.setState(s => ({ shoppingItems: s.shoppingItems.map(i => i.id === item.id ? { ...i, checked: newVal } : i) }));
+    await this.api(`/plans/${this.state.planId}/shopping-list/${item.id}/check`, { method: 'PATCH', body: JSON.stringify({ checked: newVal }) });
+  };
+
+  tabStyle(active) {
+    return {
+      display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 16px', borderRadius: '10px',
+      border: active ? '1px solid oklch(48% 0.13 152)' : '1px solid oklch(90% 0.02 85)',
+      background: active ? 'oklch(94% 0.04 152)' : 'transparent',
+      color: active ? 'oklch(30% 0.08 152)' : 'oklch(40% 0.02 100)',
+      fontWeight: 800, fontSize: '14px', cursor: 'pointer',
+    };
+  }
+  tabNumStyle(active) {
+    return {
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px',
+      borderRadius: '999px', fontSize: '11px', fontWeight: 900,
+      background: active ? 'oklch(48% 0.13 152)' : 'oklch(85% 0.02 85)',
+      color: active ? 'white' : 'oklch(45% 0.02 100)',
+    };
+  }
+
+  renderVals() {
+    const s = this.state;
+    const filteredRecipes = s.recipes
+      .filter(r => !s.recipeSearch || (r.name || '').toLowerCase().includes(s.recipeSearch.toLowerCase()))
+      .map(r => ({
+        ...r,
+        servingsLabel: `${r.servings || '?'} porciones base`,
+        ingredientsSummary: (r.ingredients || []).map(i => i.name || i.raw).filter(Boolean).slice(0, 5).join(', ') || 'Sin ingredientes listados',
+        onDelete: () => this.deleteRecipe(r.id),
+      }));
+
+    const mealRows = MEAL_TYPES.map(mt => ({
+      label: mt.label,
+      cells: DAYS.map((day, dayIdx) => {
+        const meal = s.meals.find(m => Number(m.day) === dayIdx && m.meal_type === mt.key);
+        const key = this.cellKey(dayIdx, mt.key);
+        const draft = s.cellDrafts[key] || {};
+        const recipe = meal ? s.recipes.find(r => r.id === meal.recipe_id) : null;
+        return {
+          assigned: !!meal,
+          recipeName: recipe ? recipe.name : 'Receta',
+          servingsLabel: meal ? `${meal.servings_override || (s.household ? s.household.num_people : '')} porciones` : '',
+          onRemove: meal ? () => this.removeMeal(meal.id) : null,
+          draftRecipeId: draft.recipeId || '',
+          draftServings: draft.servings || (s.household ? s.household.num_people : 2),
+          onChangeRecipe: (e) => this.setCellDraftRecipe(key, e.target.value),
+          onChangeServings: (e) => this.setCellDraftServings(key, e.target.value),
+          onAssign: () => this.assignMeal(dayIdx, mt.key),
+        };
+      }),
+    }));
+
+    const shoppingItems = s.shoppingItems.map(item => {
+      const name = item.ingredient_name || item.name || 'Ingrediente';
+      const qty = item.quantity ?? item.amount ?? '';
+      const unit = item.unit || '';
+      const cost = item.estimated_cost ?? item.cost ?? null;
+      const store = item.cheaper_store || item.store || item.best_store || '—';
+      const checked = !!(item.checked ?? item.purchased);
+      return {
+        id: item.id,
+        name, checked,
+        quantityLabel: `${qty} ${unit}`.trim(),
+        costLabel: cost != null ? `$${Number(cost).toFixed(2)}` : '—',
+        store,
+        onToggle: () => this.toggleItemChecked({ id: item.id, checked }),
+        rowStyle: {
+          display: 'grid', gridTemplateColumns: '34px 1.6fr 1fr 1fr 1.1fr', alignItems: 'center',
+          padding: '12px 16px', borderTop: '1px solid oklch(92% 0.015 85)',
+          background: checked ? 'oklch(96% 0.02 152)' : 'transparent',
+        },
+        textStyle: {
+          fontSize: '13px', fontWeight: 600,
+          color: checked ? 'oklch(60% 0.02 100)' : 'oklch(28% 0.03 145)',
+          textDecoration: checked ? 'line-through' : 'none',
+        },
+        storeStyle: {
+          fontSize: '12px', fontWeight: 800, color: 'oklch(55% 0.13 55)',
+          textDecoration: checked ? 'line-through' : 'none',
+        },
+      };
+    });
+
+    const ingredientRows = s.ingredients.map(ing => {
+      const linkCount = (ing.product_links || []).length;
+      return {
+        id: ing.id,
+        name: ing.name,
+        default_unit: ing.default_unit,
+        linksLabel: linkCount > 0 ? `${linkCount} producto(s) vinculado(s)` : 'sin vincular',
+        isSearching: s.searchingIngredientId === ing.id,
+        searchToggleLabel: s.searchingIngredientId === ing.id ? 'Cerrar' : 'Vincular producto',
+        onToggleSearch: () => this.toggleIngredientSearch(ing.id),
+        onSearch: () => this.searchProducts(),
+      };
+    });
+
+    const productResults = s.productResults.map(p => ({
+      id: p.id,
+      name: p.name,
+      store: p.store,
+      priceLabel: Number(p.price).toFixed(2),
+      onLink: () => this.linkProduct(s.searchingIngredientId, p.id),
+    }));
+
+    const members = (s.household && s.household.members || []).map(m => ({
+      name: m.name,
+      goalLabel: GOAL_LABELS[m.goal] || m.goal,
+      goalBg: m.goal === 'deficit' ? 'oklch(94% 0.05 45)' : m.goal === 'superavit' ? 'oklch(94% 0.04 152)' : 'oklch(93% 0.02 85)',
+      goalColor: m.goal === 'deficit' ? 'oklch(45% 0.1 45)' : m.goal === 'superavit' ? 'oklch(40% 0.08 152)' : 'oklch(45% 0.02 100)',
+    }));
+
+    return {
+      apiError: s.apiError, dismissError: this.dismissError,
+      isHogar: s.view === 'hogar', isRecetas: s.view === 'recetas', isPlan: s.view === 'plan', isLista: s.view === 'lista', isIngredientes: s.view === 'ingredientes',
+      goHogar: this.goHogar, goRecetas: this.goRecetas, goPlan: this.goPlan, goLista: this.goLista, goIngredientes: this.goIngredientes,
+      tabStyleHogar: this.tabStyle(s.view === 'hogar'), tabNumStyleHogar: this.tabNumStyle(s.view === 'hogar'),
+      tabStyleRecetas: this.tabStyle(s.view === 'recetas'), tabNumStyleRecetas: this.tabNumStyle(s.view === 'recetas'),
+      tabStylePlan: this.tabStyle(s.view === 'plan'), tabNumStylePlan: this.tabNumStyle(s.view === 'plan'),
+      tabStyleLista: this.tabStyle(s.view === 'lista'), tabNumStyleLista: this.tabNumStyle(s.view === 'lista'),
+      tabStyleIngredientes: this.tabStyle(s.view === 'ingredientes'), tabNumStyleIngredientes: this.tabNumStyle(s.view === 'ingredientes'),
+
+      household: s.household,
+      showHouseholdForm: s.showHouseholdForm || !s.household,
+      householdFormTitle: s.household ? 'Editar hogar' : 'Crear hogar',
+      householdForm: s.householdForm,
+      setHouseholdName: this.setHouseholdName, setHouseholdBudget: this.setHouseholdBudget, setHouseholdNumPeople: this.setHouseholdNumPeople,
+      saveHousehold: this.saveHousehold, savingHousehold: s.savingHousehold,
+      saveHouseholdLabel: s.savingHousehold ? 'Guardando...' : 'Guardar hogar',
+      editHouseholdLabel: s.showHouseholdForm ? 'Cancelar' : 'Editar',
+      toggleEditHousehold: this.toggleEditHousehold,
+      members, hasMembers: members.length > 0,
+      newMember: s.newMember, setNewMemberName: this.setNewMemberName, setNewMemberGoal: this.setNewMemberGoal, addMember: this.addMember,
+
+      recipes: s.recipes, recipeSearch: s.recipeSearch, setRecipeSearch: this.setRecipeSearch,
+      filteredRecipes, hasFilteredRecipes: filteredRecipes.length > 0, noRecipesAtAll: s.recipes.length === 0,
+      showAddRecipeForm: s.showAddRecipeForm, toggleAddRecipeForm: this.toggleAddRecipeForm,
+      showImportForm: s.showImportForm, toggleImportForm: this.toggleImportForm,
+      newRecipe: s.newRecipe, setNewRecipeName: this.setNewRecipeName, setNewRecipeServings: this.setNewRecipeServings,
+      setNewRecipeInstructions: this.setNewRecipeInstructions, setNewRecipeIngredients: this.setNewRecipeIngredients,
+      saveNewRecipe: this.saveNewRecipe, savingRecipe: s.savingRecipe, saveRecipeLabel: s.savingRecipe ? 'Guardando...' : 'Guardar receta',
+      importUrl: s.importUrl, setImportUrl: this.setImportUrl, runImport: this.runImport, importing: s.importing,
+      importButtonLabel: s.importing ? 'Importando...' : 'Importar',
+      importDraft: s.importDraft,
+      setImportDraftName: this.setImportDraftName, setImportDraftServings: this.setImportDraftServings,
+      setImportDraftInstructions: this.setImportDraftInstructions, setImportDraftIngredients: this.setImportDraftIngredients,
+      saveImportedRecipe: this.saveImportedRecipe,
+
+      planId: s.planId, weekStartLabel: s.weekStart, createPlan: this.createPlan, creatingPlan: s.creatingPlan,
+      createPlanLabel: s.creatingPlan ? 'Creando...' : 'Crear plan semanal',
+      noRecipesForPlan: s.recipes.length === 0,
+      dayHeaders: DAYS, mealRows,
+
+      generateList: this.generateList, generatingList: s.generatingList,
+      generateListLabel: s.generatingList ? 'Generando...' : 'Generar lista',
+      shoppingItems, hasShoppingItems: shoppingItems.length > 0, noShoppingItems: shoppingItems.length === 0 && !!s.planId,
+
+      newIngredient: s.newIngredient, setNewIngredientName: this.setNewIngredientName, setNewIngredientUnit: this.setNewIngredientUnit,
+      addIngredient: this.addIngredient, savingIngredient: s.savingIngredient,
+      addIngredientLabel: s.savingIngredient ? 'Guardando...' : 'Añadir ingrediente',
+      ingredientRows, hasIngredients: ingredientRows.length > 0, noIngredients: ingredientRows.length === 0,
+      productQuery: s.productQuery, setProductQuery: this.setProductQuery, searchingProducts: s.searchingProducts,
+      searchButtonLabel: s.searchingProducts ? 'Buscando...' : 'Buscar',
+      productResults,
+    };
+  }
+}
+
+</script>
+</body>
+</html>

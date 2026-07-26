@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vianda
+      POSTGRES_PASSWORD: vianda
+      POSTGRES_DB: vianda
+    volumes:
+      - vianda_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql+psycopg2://vianda:vianda@db:5432/vianda
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+
+  frontend:
+    image: python:3.11-slim
+    working_dir: /site
+    command: python -m http.server 5173
+    volumes:
+      - ./frontend:/site
+    ports:
+      - "5173:5173"
+
+volumes:
+  vianda_pgdata:
