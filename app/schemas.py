@@ -66,6 +66,7 @@ class IngredientBase(BaseModel):
     name: str
     default_unit: str = "g"
     category: Optional[str] = None
+    exclude_keywords: Optional[str] = None
 
 
 class IngredientCreate(IngredientBase):
@@ -132,9 +133,42 @@ class RecipeOut(BaseModel):
     prep_time_minutes: Optional[int] = None
     image_url: Optional[str] = None
     ingredients: list[RecipeIngredientOut] = []
+    estimated_kcal_total: Optional[float] = None
+    estimated_kcal_per_serving: Optional[float] = None
 
     class Config:
         from_attributes = True
+
+    @staticmethod
+    def from_orm_recipe(recipe):
+        from app.core.calories import estimar_kcal_receta
+
+        obj = RecipeOut.model_validate(recipe)
+        kcal_info = estimar_kcal_receta(recipe.ingredients)
+        obj.estimated_kcal_total = kcal_info["total_kcal"]
+        if kcal_info["total_kcal"] is not None and recipe.servings:
+            obj.estimated_kcal_per_serving = round(kcal_info["total_kcal"] / recipe.servings, 0)
+        return obj
+
+
+# ---------- Recetas externas (TheMealDB) ----------
+
+class ExternalRecipeSummary(BaseModel):
+    external_id: str
+    name: str
+    image_url: Optional[str] = None
+    category: Optional[str] = None
+    area: Optional[str] = None
+
+
+class ExternalRecipeDetail(BaseModel):
+    external_id: str
+    name: str
+    image_url: Optional[str] = None
+    category: Optional[str] = None
+    area: Optional[str] = None
+    instructions: Optional[str] = None
+    ingredients: list[str] = []  # líneas ya combinadas "medida + ingrediente"
 
 
 # ---------- Planning ----------
@@ -143,30 +177,53 @@ class PlanMealCreate(BaseModel):
     recipe_id: str
     day: date
     meal_type: str
+    member_id: Optional[str] = None
+    is_required: bool = True
     servings_override: Optional[int] = None
 
 
 class PlanMealOut(PlanMealCreate):
     id: str
     plan_id: str
+    estimated_kcal: Optional[float] = None
 
     class Config:
         from_attributes = True
 
+    @staticmethod
+    def from_orm_meal(meal):
+        from app.core.calories import estimar_kcal_receta
 
-class WeeklyPlanCreate(BaseModel):
+        obj = PlanMealOut.model_validate(meal)
+        if meal.recipe:
+            kcal_info = estimar_kcal_receta(meal.recipe.ingredients)
+            if kcal_info["total_kcal"] is not None and meal.recipe.servings:
+                scale = (meal.servings_override or meal.recipe.servings) / meal.recipe.servings
+                obj.estimated_kcal = round(kcal_info["total_kcal"] * scale, 0)
+        return obj
+
+
+class PlanCreate(BaseModel):
     household_id: str
-    week_start: date
+    start_date: date
+    end_date: date
 
 
-class WeeklyPlanOut(BaseModel):
+class PlanOut(BaseModel):
     id: str
     household_id: str
-    week_start: date
+    start_date: date
+    end_date: date
     meals: list[PlanMealOut] = []
 
     class Config:
         from_attributes = True
+
+    @staticmethod
+    def from_orm_plan(plan):
+        obj = PlanOut.model_validate({**plan.__dict__, "meals": []})
+        obj.meals = [PlanMealOut.from_orm_meal(m) for m in plan.meals]
+        return obj
 
 
 # ---------- Shopping list ----------

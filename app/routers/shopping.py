@@ -21,7 +21,7 @@ def generate_shopping_list(plan_id: str, db: Session = Depends(get_db)):
     Ingredientes de recipe_ingredients sin ingredient_id vinculado se ignoran
     (no pueden comprarse automáticamente hasta que se vinculen).
     """
-    plan = db.query(models.WeeklyPlan).get(plan_id)
+    plan = db.query(models.Plan).get(plan_id)
     if not plan:
         raise HTTPException(404, "Plan no encontrado")
 

@@ -24,17 +24,20 @@
 // ============================================================
 // CONFIG
 // ============================================================
-// Cambia esto si tu backend vive en otra URL.
 const API_BASE_URL = "https://vianda-backend-production-8057.up.railway.app";
 
-const DAYS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 const MEAL_TYPES = [
-  { key: 'desayuno', label: 'Desayuno' },
-  { key: 'almuerzo', label: 'Almuerzo' },
-  { key: 'cena', label: 'Cena' },
-  { key: 'snack', label: 'Snack' },
+  { key: 'desayuno', label: 'Desayuno', required: true },
+  { key: 'almuerzo', label: 'Almuerzo', required: true },
+  { key: 'cena', label: 'Cena', required: true },
 ];
 const GOAL_LABELS = { deficit: 'Déficit', mantenimiento: 'Mantenimiento', superavit: 'Superávit' };
+const DURATION_OPTIONS = [
+  { key: '3d', label: '3 días', days: 3 },
+  { key: '7d', label: '1 semana', days: 7 },
+  { key: '14d', label: '2 semanas', days: 14 },
+  { key: 'custom', label: 'Personalizado', days: null },
+];
 
 // ============================================================
 // HELPERS
@@ -65,6 +68,7 @@ function parseIngredientLine(line) {
 function ingredientsToText(ingredients) {
   if (!Array.isArray(ingredients)) return '';
   return ingredients.map(i => {
+    if (typeof i === 'string') return i;
     const parts = [];
     if (i.quantity != null) parts.push(i.quantity);
     if (i.unit) parts.push(i.unit);
@@ -73,13 +77,35 @@ function ingredientsToText(ingredients) {
   }).join('\n');
 }
 
-function getMonday(d) {
-  const date = new Date(d);
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(date.setDate(diff));
-  monday.setHours(0, 0, 0, 0);
-  return monday;
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysISO(iso, days) {
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function dateRangeISO(startISO, endISO) {
+  const out = [];
+  let cur = startISO;
+  let guard = 0;
+  while (cur <= endISO && guard < 60) {
+    out.push(cur);
+    cur = addDaysISO(cur, 1);
+    guard++;
+  }
+  return out;
+}
+
+function labelForDate(iso) {
+  try {
+    const d = new Date(iso + 'T00:00:00');
+    return d.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
+  } catch (e) {
+    return iso;
+  }
 }
 
 function getPath(obj, path) {
@@ -103,27 +129,40 @@ function setPath(obj, path, value) {
 const state = {
   view: 'hogar',
   apiError: null,
+
   household: null,
   householdForm: { name: '', budget: '', num_people: 2 },
   showHouseholdForm: true,
   savingHousehold: false,
   newMember: { name: '', goal: 'mantenimiento' },
+
   recipes: [],
   recipeSearch: '',
   showAddRecipeForm: false,
   showImportForm: false,
+  showExternalSearch: false,
   newRecipe: { name: '', servings: 4, instructions: '', ingredientsText: '' },
   importUrl: '',
   importDraft: null,
   importing: false,
   savingRecipe: false,
+  externalQuery: '',
+  externalResults: [],
+  searchingExternal: false,
+
   planId: null,
-  weekStart: getMonday(new Date()).toISOString().slice(0, 10),
+  planStartDate: null,
+  planEndDate: null,
+  planForm: { start_date: todayISO(), duration: '7d', custom_end_date: '' },
   meals: [],
   creatingPlan: false,
   cellDrafts: {},
+  snackFormOpenFor: null,
+  snackDraft: { recipeId: '', memberId: '', servings: 1 },
+
   shoppingItems: [],
   generatingList: false,
+
   ingredients: [],
   newIngredient: { name: '', default_unit: 'g' },
   savingIngredient: false,
@@ -131,6 +170,7 @@ const state = {
   productQuery: '',
   productResults: [],
   searchingProducts: false,
+
   compareQuery: '',
   compareResults: [],
   comparing: false,
@@ -208,7 +248,9 @@ async function loadRecipes() {
 
 async function loadPlan(id) {
   const r = await api(`/plans/${id}`);
-  if (r.ok && r.data) setState({ meals: r.data.meals || [] });
+  if (r.ok && r.data) {
+    setState({ meals: r.data.meals || [], planStartDate: r.data.start_date, planEndDate: r.data.end_date });
+  }
 }
 
 async function loadShoppingList(id) {
@@ -217,7 +259,7 @@ async function loadShoppingList(id) {
 }
 
 // ============================================================
-// ACCIONES (equivalentes a los métodos del componente original)
+// ACCIONES
 // ============================================================
 const actions = {
   dismissError: () => setState({ apiError: null }),
@@ -228,6 +270,7 @@ const actions = {
   goIngredientes: () => setState({ view: 'ingredientes' }),
   goComparar: () => setState({ view: 'comparar' }),
 
+  // -------- Ingredientes / búsqueda de productos --------
   addIngredient: async () => {
     const n = state.newIngredient;
     if (!n.name.trim()) return;
@@ -254,7 +297,10 @@ const actions = {
     const q = state.productQuery.trim();
     if (!q) return;
     setState({ searchingProducts: true });
-    const r = await api(`/ingredients/products/search?q=${encodeURIComponent(q)}`);
+    const ing = state.ingredients.find(i => i.id === state.searchingIngredientId);
+    const exclude = ing && ing.exclude_keywords ? `&exclude=${encodeURIComponent(ing.exclude_keywords)}` : '';
+    const catHint = ing && ing.category ? `&category_hint=${encodeURIComponent(ing.category)}` : '';
+    const r = await api(`/ingredients/products/search?q=${encodeURIComponent(q)}${exclude}${catHint}`);
     if (r.ok && Array.isArray(r.data)) setState({ productResults: r.data });
     setState({ searchingProducts: false });
   },
@@ -274,10 +320,16 @@ const actions = {
     const r = await api(`/ingredients/${ingredientId}/link/${storeProductId}`, { method: 'POST' });
     if (r.ok) {
       await loadIngredients();
-      setState({ searchingIngredientId: null, productQuery: '', productResults: [] });
+      setState({ productQuery: '', productResults: [] });
     }
   },
 
+  unlinkProduct: async (ingredientId, linkId) => {
+    const r = await api(`/ingredients/${ingredientId}/link/${linkId}`, { method: 'DELETE' });
+    if (r.ok) await loadIngredients();
+  },
+
+  // -------- Hogar --------
   toggleEditHousehold: () => setState(s => ({ showHouseholdForm: !s.showHouseholdForm })),
 
   saveHousehold: async () => {
@@ -307,8 +359,36 @@ const actions = {
     }
   },
 
-  toggleAddRecipeForm: () => setState(s => ({ showAddRecipeForm: !s.showAddRecipeForm, showImportForm: false })),
-  toggleImportForm: () => setState(s => ({ showImportForm: !s.showImportForm, showAddRecipeForm: false })),
+  // -------- Recetas --------
+  toggleAddRecipeForm: () => setState(s => ({ showAddRecipeForm: !s.showAddRecipeForm, showImportForm: false, showExternalSearch: false })),
+  toggleImportForm: () => setState(s => ({ showImportForm: !s.showImportForm, showAddRecipeForm: false, showExternalSearch: false })),
+  toggleExternalSearch: () => setState(s => ({ showExternalSearch: !s.showExternalSearch, showAddRecipeForm: false, showImportForm: false })),
+
+  searchExternalRecipes: async () => {
+    const q = state.externalQuery.trim();
+    if (!q) return;
+    setState({ searchingExternal: true });
+    const r = await api(`/external-recipes/search?q=${encodeURIComponent(q)}`);
+    if (r.ok && Array.isArray(r.data)) setState({ externalResults: r.data });
+    setState({ searchingExternal: false });
+  },
+
+  previewExternalRecipe: async (externalId) => {
+    const r = await api(`/external-recipes/${externalId}`);
+    if (r.ok && r.data) {
+      const d = r.data;
+      setState({
+        importDraft: {
+          name: d.name || '',
+          servings: 4,
+          instructions: d.instructions || '',
+          ingredientsText: ingredientsToText(d.ingredients),
+        },
+        showImportForm: true,
+        showExternalSearch: false,
+      });
+    }
+  },
 
   saveNewRecipe: async () => {
     const n = state.newRecipe;
@@ -377,28 +457,54 @@ const actions = {
     if (r.ok) await loadRecipes();
   },
 
+  // -------- Plan --------
   createPlan: async () => {
     const h = state.household;
     if (!h) { setState({ apiError: 'Configura tu hogar primero.' }); return; }
+    const f = state.planForm;
+    const durationDef = DURATION_OPTIONS.find(d => d.key === f.duration);
+    let endDate;
+    if (durationDef && durationDef.days) {
+      endDate = addDaysISO(f.start_date, durationDef.days - 1);
+    } else {
+      endDate = f.custom_end_date || f.start_date;
+    }
     setState({ creatingPlan: true });
-    const r = await api('/plans/', { method: 'POST', body: JSON.stringify({ household_id: h.id, week_start: state.weekStart }) });
+    const r = await api('/plans/', { method: 'POST', body: JSON.stringify({ household_id: h.id, start_date: f.start_date, end_date: endDate }) });
     if (r.ok && r.data) {
       localStorage.setItem('vianda_plan_id', r.data.id);
-      setState({ planId: r.data.id, meals: r.data.meals || [] });
+      setState({ planId: r.data.id, planStartDate: r.data.start_date, planEndDate: r.data.end_date, meals: r.data.meals || [] });
     }
     setState({ creatingPlan: false });
   },
 
-  assignMeal: async (dayIdx, mealKey) => {
-    const key = cellKey(dayIdx, mealKey);
+  assignMeal: async (dateISO, mealKey) => {
+    const key = cellKey(dateISO, mealKey, '');
     const draft = state.cellDrafts[key] || {};
     if (!draft.recipeId) return;
     const servings = draft.servings || (state.household ? state.household.num_people : 2);
-    const body = { day: dayIdx, meal_type: mealKey, recipe_id: draft.recipeId, servings_override: parseInt(servings) };
+    const body = { day: dateISO, meal_type: mealKey, recipe_id: draft.recipeId, servings_override: parseInt(servings), is_required: true };
     const r = await api(`/plans/${state.planId}/meals`, { method: 'POST', body: JSON.stringify(body) });
     if (r.ok) {
-      const meal = r.data || { id: Date.now(), ...body };
-      setState(s => ({ meals: [...s.meals, meal] }));
+      setState(s => ({ meals: [...s.meals, r.data] }));
+    }
+  },
+
+  openSnackForm: (dateISO) => setState({ snackFormOpenFor: dateISO, snackDraft: { recipeId: '', memberId: '', servings: 1 } }),
+  cancelSnackForm: () => setState({ snackFormOpenFor: null }),
+
+  confirmAddSnack: async (dateISO) => {
+    const d = state.snackDraft;
+    if (!d.recipeId) return;
+    const servings = d.memberId ? 1 : (state.household ? state.household.num_people : 1);
+    const body = {
+      day: dateISO, meal_type: 'snack', recipe_id: d.recipeId,
+      member_id: d.memberId || null, is_required: false,
+      servings_override: parseInt(d.servings) || servings,
+    };
+    const r = await api(`/plans/${state.planId}/meals`, { method: 'POST', body: JSON.stringify(body) });
+    if (r.ok) {
+      setState(s => ({ meals: [...s.meals, r.data], snackFormOpenFor: null }));
     }
   },
 
@@ -422,7 +528,7 @@ const actions = {
   },
 };
 
-function cellKey(dayIdx, mealKey) { return `${dayIdx}-${mealKey}`; }
+function cellKey(dateISO, mealKey, memberId) { return `${dateISO}-${mealKey}-${memberId || 'all'}`; }
 
 // ============================================================
 // ESTILOS DE PESTAÑAS
@@ -446,12 +552,13 @@ function tabNumStyle(active) {
 }
 
 // ============================================================
-// VISTAS (cada función devuelve un string HTML)
+// VISTAS
 // ============================================================
 
 function viewHogar() {
   const s = state;
   const members = (s.household && s.household.members || []).map(m => ({
+    id: m.id,
     name: m.name,
     goalLabel: GOAL_LABELS[m.goal] || m.goal,
     goalBg: m.goal === 'deficit' ? 'oklch(94% 0.05 45)' : m.goal === 'superavit' ? 'oklch(94% 0.04 152)' : 'oklch(93% 0.02 85)',
@@ -494,7 +601,7 @@ function viewHogar() {
 
     <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;padding:22px;">
       <div style="font-weight:800;font-size:16px;margin-bottom:4px;font-family:'Nunito',sans-serif;">Miembros del hogar</div>
-      <div style="color:oklch(55% 0.02 100);font-size:13px;margin-bottom:16px;">Cada persona con su objetivo nutricional.</div>
+      <div style="color:oklch(55% 0.02 100);font-size:13px;margin-bottom:16px;">Cada persona con su objetivo nutricional (opcional — puedes ignorarlo si no te interesa).</div>
 
       ${members.length > 0 ? `
         <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
@@ -525,6 +632,52 @@ function viewHogar() {
   `;
 }
 
+function recipeIngredientRow(recipe, ri, catalogIngredientOptions, s) {
+  const isLinkedToCatalog = !!ri.ingredient_id;
+  const catalogIngredient = isLinkedToCatalog ? s.ingredients.find(i => i.id === ri.ingredient_id) : null;
+  const isSearchingThis = catalogIngredient && s.searchingIngredientId === catalogIngredient.id;
+  const linkCount = catalogIngredient ? (catalogIngredient.product_links || []).length : 0;
+
+  return `
+    <div style="border-top:1px solid oklch(94% 0.01 85);padding-top:8px;margin-top:8px;">
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;">
+        <div style="flex:1;color:oklch(45% 0.02 100);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(ri.raw_text)}</div>
+        <select data-change-action="linkRecipeIngredient" data-recipe-id="${esc(recipe.id)}" data-recipe-ingredient-id="${esc(ri.id)}" style="padding:4px 6px;border-radius:6px;border:1px solid oklch(88% 0.02 85);font-size:11px;max-width:110px;">
+          <option value="">${ri.ingredient_id ? 'vinculado' : 'sin vincular'}</option>
+          ${catalogIngredientOptions.map(opt => `<option value="${esc(opt.id)}" ${String(ri.ingredient_id) === String(opt.id) ? 'selected' : ''}>${esc(opt.name)}</option>`).join('')}
+        </select>
+      </div>
+      ${catalogIngredient ? `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;">
+          <div style="font-size:11px;color:oklch(55% 0.02 100);">${linkCount > 0 ? `${linkCount} producto(s) vinculado(s)` : 'sin producto de super vinculado'}</div>
+          <button data-action="toggleIngredientSearch" data-id="${esc(catalogIngredient.id)}" style="background:transparent;border:1px solid oklch(48% 0.13 152);color:oklch(40% 0.11 152);border-radius:6px;padding:3px 8px;font-weight:700;font-size:11px;cursor:pointer;">${isSearchingThis ? 'Cerrar' : 'Ver opciones de producto'}</button>
+        </div>
+        ${isSearchingThis ? productSearchPanel(catalogIngredient, s) : ''}
+      ` : ''}
+    </div>
+  `;
+}
+
+function productSearchPanel(ing, s) {
+  const results = s.productResults.map(p => ({ id: p.id, name: p.name, store: p.store, priceLabel: Number(p.price).toFixed(2) }));
+  return `
+    <div style="margin-top:8px;background:oklch(97% 0.018 85);border-radius:8px;padding:10px;">
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input placeholder="Buscar producto (ej: arroz blanco)" value="${esc(s.productQuery)}" data-bind="productQuery" style="flex:1;padding:7px 9px;border-radius:7px;border:1px solid oklch(88% 0.02 85);font-size:12px;" />
+        <button data-action="searchProducts" ${s.searchingProducts ? 'disabled' : ''} style="background:oklch(93% 0.02 85);border:1px solid oklch(85% 0.02 85);border-radius:7px;padding:7px 12px;font-weight:700;font-size:12px;cursor:pointer;">${s.searchingProducts ? '...' : 'Buscar'}</button>
+      </div>
+      ${ing.category || ing.exclude_keywords ? `<div style="font-size:10px;color:oklch(55% 0.02 100);margin-bottom:6px;">Filtro activo: ${ing.category ? `categoría "${esc(ing.category)}"` : ''}${ing.exclude_keywords ? ` · excluye "${esc(ing.exclude_keywords)}"` : ''} (editable en la pestaña Ingredientes)</div>` : ''}
+      ${results.map(p => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid oklch(92% 0.015 85);font-size:12px;">
+          <div style="flex:1;">${esc(p.name)} <span style="color:oklch(55% 0.02 100);">(${esc(p.store)})</span></div>
+          <div style="font-weight:800;margin:0 10px;">$${esc(p.priceLabel)}</div>
+          <button data-action="linkProduct" data-ingredient-id="${esc(ing.id)}" data-product-id="${esc(p.id)}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:6px;padding:5px 10px;font-weight:700;font-size:11px;cursor:pointer;">Vincular</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 function viewRecetas() {
   const s = state;
   const filteredRecipes = s.recipes
@@ -538,10 +691,36 @@ function viewRecetas() {
         <p style="color:oklch(55% 0.02 100);margin:0;font-size:14px;">Tu biblioteca de recetas guardadas.</p>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button data-action="toggleExternalSearch" style="background:oklch(94% 0.03 85);border:1px solid oklch(88% 0.02 85);border-radius:10px;padding:10px 16px;font-weight:700;font-size:13px;cursor:pointer;color:oklch(28% 0.03 145);">Buscar en catálogo de recetas</button>
         <button data-action="toggleImportForm" style="background:oklch(94% 0.03 85);border:1px solid oklch(88% 0.02 85);border-radius:10px;padding:10px 16px;font-weight:700;font-size:13px;cursor:pointer;color:oklch(28% 0.03 145);">Importar desde URL</button>
         <button data-action="toggleAddRecipeForm" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:10px 16px;font-weight:800;font-size:13px;cursor:pointer;">+ Añadir receta manual</button>
       </div>
     </div>
+
+    ${s.showExternalSearch ? `
+      <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;padding:22px;margin-bottom:20px;">
+        <div style="font-weight:800;font-size:16px;margin-bottom:6px;font-family:'Nunito',sans-serif;">Buscar recetas (TheMealDB)</div>
+        <div style="font-size:12px;color:oklch(55% 0.02 100);margin-bottom:14px;">Base de datos externa gratuita — los resultados vienen en inglés, puedes editar el nombre/ingredientes antes de guardar.</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+          <input value="${esc(s.externalQuery)}" data-bind="externalQuery" data-enter-action="searchExternalRecipes" placeholder="Ej: chicken, pasta, curry..." style="flex:1;min-width:220px;padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+          <button data-action="searchExternalRecipes" ${s.searchingExternal ? 'disabled' : ''} style="background:oklch(68% 0.17 55);color:white;border:none;border-radius:10px;padding:10px 18px;font-weight:800;font-size:14px;cursor:pointer;">${s.searchingExternal ? 'Buscando...' : 'Buscar'}</button>
+        </div>
+        ${s.externalResults.length > 0 ? `
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;">
+            ${s.externalResults.map(m => `
+              <div style="border:1px solid oklch(90% 0.02 85);border-radius:12px;overflow:hidden;">
+                ${m.image_url ? `<img src="${esc(m.image_url)}" style="width:100%;height:110px;object-fit:cover;display:block;" />` : ''}
+                <div style="padding:10px;">
+                  <div style="font-weight:800;font-size:13px;margin-bottom:4px;">${esc(m.name)}</div>
+                  <div style="font-size:11px;color:oklch(55% 0.02 100);margin-bottom:8px;">${esc(m.category || '')}${m.area ? ' · ' + esc(m.area) : ''}</div>
+                  <button data-action="previewExternalRecipe" data-id="${esc(m.external_id)}" style="width:100%;background:oklch(48% 0.13 152);color:white;border:none;border-radius:7px;padding:7px;font-weight:700;font-size:12px;cursor:pointer;">Ver / Importar</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      </div>
+    ` : ''}
 
     ${s.showImportForm ? `
       <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;padding:22px;margin-bottom:20px;">
@@ -565,7 +744,7 @@ function viewRecetas() {
               <textarea data-bind="importDraft.instructions" rows="4" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;">${esc(s.importDraft.instructions)}</textarea>
             </label>
             <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:16px;">Ingredientes (uno por línea, ej: "200g pollo")
-              <textarea data-bind="importDraft.ingredientsText" rows="5" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;">${esc(s.importDraft.ingredientsText)}</textarea>
+              <textarea data-bind="importDraft.ingredientsText" rows="6" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;">${esc(s.importDraft.ingredientsText)}</textarea>
             </label>
             <button data-action="saveImportedRecipe" ${s.savingRecipe ? 'disabled' : ''} style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">${s.savingRecipe ? 'Guardando...' : 'Guardar receta'}</button>
           </div>
@@ -590,107 +769,155 @@ function viewRecetas() {
         <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:16px;">Ingredientes (uno por línea, ej: "200g pollo")
           <textarea data-bind="newRecipe.ingredientsText" rows="5" placeholder="200g pollo&#10;1 taza arroz&#10;2 cdas aceite" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;">${esc(s.newRecipe.ingredientsText)}</textarea>
         </label>
+        <div style="font-size:11px;color:oklch(55% 0.02 100);margin-bottom:12px;">Después de guardar, en cada receta vas a poder vincular cada ingrediente a un producto real de Super99/Riba Smith.</div>
         <button data-action="saveNewRecipe" ${s.savingRecipe ? 'disabled' : ''} style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">${s.savingRecipe ? 'Guardando...' : 'Guardar receta'}</button>
       </div>
     ` : ''}
 
-    <input type="text" value="${esc(s.recipeSearch)}" data-bind="recipeSearch" placeholder="Buscar receta..." style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;margin-bottom:18px;background:oklch(99% 0.006 85);" />
+    <input type="text" value="${esc(s.recipeSearch)}" data-bind="recipeSearch" placeholder="Buscar en tu recetario..." style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;margin-bottom:18px;background:oklch(99% 0.006 85);" />
 
     ${filteredRecipes.length > 0 ? `
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">
         ${filteredRecipes.map(r => {
-          const ingredientsSummary = (r.ingredients || []).map(i => i.raw_text || i.name || i.raw).filter(Boolean).slice(0, 5).join(', ') || 'Sin ingredientes listados';
-          const rows = (r.ingredients || []).map(ri => `
-            <div style="display:flex;align-items:center;gap:6px;font-size:12px;">
-              <div style="flex:1;color:oklch(45% 0.02 100);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(ri.raw_text)}</div>
-              <select data-change-action="linkRecipeIngredient" data-recipe-id="${esc(r.id)}" data-recipe-ingredient-id="${esc(ri.id)}" style="padding:4px 6px;border-radius:6px;border:1px solid oklch(88% 0.02 85);font-size:11px;max-width:110px;">
-                <option value="">${ri.ingredient_id ? 'vinculado' : 'sin vincular'}</option>
-                ${catalogIngredientOptions.map(opt => `<option value="${esc(opt.id)}" ${String(ri.ingredient_id) === String(opt.id) ? 'selected' : ''}>${esc(opt.name)}</option>`).join('')}
-              </select>
-            </div>
-          `).join('');
+          const rows = (r.ingredients || []).map(ri => recipeIngredientRow(r, ri, catalogIngredientOptions, s)).join('');
+          const kcalLabel = r.estimated_kcal_per_serving != null ? `~${r.estimated_kcal_per_serving} kcal/porción` : 'kcal: sin estimar';
           return `
-            <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px;">
+            <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:6px;">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
                 <div style="font-weight:800;font-size:15px;font-family:'Nunito',sans-serif;">${esc(r.name)}</div>
                 <button data-action="deleteRecipe" data-id="${esc(r.id)}" style="background:none;border:none;color:oklch(60% 0.02 100);cursor:pointer;font-size:16px;line-height:1;padding:0;">🗑</button>
               </div>
-              <div style="font-size:12px;color:oklch(55% 0.02 100);">${esc(r.servings || '?')} porciones base</div>
-              <div style="font-size:13px;color:oklch(40% 0.02 100);flex:1;">${esc(ingredientsSummary)}</div>
+              <div style="font-size:12px;color:oklch(55% 0.02 100);display:flex;gap:8px;flex-wrap:wrap;">
+                <span>${esc(r.servings || '?')} porciones base</span>
+                <span style="color:oklch(48% 0.13 152);font-weight:700;">${kcalLabel}</span>
+              </div>
               ${rows}
             </div>
           `;
         }).join('')}
       </div>
     ` : ''}
-    ${s.recipes.length === 0 ? `<div style="text-align:center;padding:50px 20px;color:oklch(55% 0.02 100);font-size:14px;">Aún no hay recetas guardadas. Añade una manualmente o impórtala desde una URL.</div>` : ''}
+    ${s.recipes.length === 0 ? `<div style="text-align:center;padding:50px 20px;color:oklch(55% 0.02 100);font-size:14px;">Aún no hay recetas guardadas. Añade una manualmente, impórtala desde una URL, o búscala en el catálogo.</div>` : ''}
   `;
 }
 
 function viewPlan() {
   const s = state;
-  const mealRows = MEAL_TYPES.map(mt => ({
-    label: mt.label,
-    cells: DAYS.map((day, dayIdx) => {
-      const meal = s.meals.find(m => Number(m.day) === dayIdx && m.meal_type === mt.key);
-      const key = cellKey(dayIdx, mt.key);
+  const hasPlan = !!s.planId && s.planStartDate && s.planEndDate;
+  const days = hasPlan ? dateRangeISO(s.planStartDate, s.planEndDate) : [];
+  const members = (s.household && s.household.members) || [];
+
+  const dayColumns = days.map(dateISO => {
+    const requiredCells = MEAL_TYPES.map(mt => {
+      const meal = s.meals.find(m => m.day === dateISO && m.meal_type === mt.key && !m.member_id);
+      const key = cellKey(dateISO, mt.key, '');
       const draft = s.cellDrafts[key] || {};
-      const recipe = meal ? s.recipes.find(r => r.id === meal.recipe_id) : null;
-      return {
-        dayIdx, mealKey: mt.key,
-        assigned: !!meal,
-        mealId: meal ? meal.id : null,
-        recipeName: recipe ? recipe.name : 'Receta',
-        servingsLabel: meal ? `${meal.servings_override || (s.household ? s.household.num_people : '')} porciones` : '',
-        draftRecipeId: draft.recipeId || '',
-        draftServings: draft.servings || (s.household ? s.household.num_people : 2),
-      };
-    }),
-  }));
+      return { mealKey: mt.key, label: mt.label, meal, draftRecipeId: draft.recipeId || '', draftServings: draft.servings || (s.household ? s.household.num_people : 2) };
+    });
+
+    const snackMeals = s.meals.filter(m => m.day === dateISO && m.meal_type === 'snack');
+
+    return `
+      <div style="min-width:200px;">
+        <div style="background:oklch(99% 0.006 85);padding:10px;font-weight:800;font-size:13px;text-align:center;border-radius:10px 10px 0 0;border:1px solid oklch(90% 0.02 85);border-bottom:none;text-transform:capitalize;font-family:'Nunito',sans-serif;">${esc(labelForDate(dateISO))}</div>
+        <div style="border:1px solid oklch(90% 0.02 85);border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:8px;">
+          ${requiredCells.map(cell => `
+            <div>
+              <div style="font-size:10px;font-weight:800;color:oklch(55% 0.02 100);text-transform:uppercase;margin-bottom:3px;">${cell.label}</div>
+              ${cell.meal ? `
+                <div style="background:oklch(94% 0.04 152);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:2px;">
+                  <div style="display:flex;justify-content:space-between;gap:6px;align-items:flex-start;">
+                    <div style="font-size:12px;font-weight:800;color:oklch(30% 0.08 152);">${esc((s.recipes.find(r => r.id === cell.meal.recipe_id) || {}).name || 'Receta')}</div>
+                    <button data-action="removeMeal" data-id="${esc(cell.meal.id)}" style="background:none;border:none;color:oklch(45% 0.08 152);cursor:pointer;font-size:13px;line-height:1;padding:0;">×</button>
+                  </div>
+                  <div style="font-size:10px;color:oklch(40% 0.05 152);">${esc(cell.meal.servings_override || '')} porciones${cell.meal.estimated_kcal != null ? ` · ~${cell.meal.estimated_kcal} kcal` : ''}</div>
+                </div>
+              ` : `
+                <select data-change-action="setCellDraftRecipe" data-day="${dateISO}" data-mealkey="${cell.mealKey}" style="width:100%;padding:5px 6px;border-radius:7px;border:1px solid oklch(88% 0.02 85);font-size:11px;margin-bottom:4px;">
+                  <option value="">Elegir receta...</option>
+                  ${s.recipes.map(r => `<option value="${esc(r.id)}" ${cell.draftRecipeId === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
+                </select>
+                <div style="display:flex;gap:4px;align-items:center;">
+                  <input type="number" min="1" value="${esc(cell.draftServings)}" data-change-action="setCellDraftServings" data-day="${dateISO}" data-mealkey="${cell.mealKey}" style="width:46px;padding:5px 6px;border-radius:7px;border:1px solid oklch(88% 0.02 85);font-size:11px;" />
+                  <button data-action="assignMeal" data-day="${dateISO}" data-mealkey="${cell.mealKey}" style="flex:1;background:oklch(68% 0.17 55);color:white;border:none;border-radius:7px;padding:5px 6px;font-weight:800;font-size:10px;cursor:pointer;">Asignar</button>
+                </div>
+              `}
+            </div>
+          `).join('')}
+
+          <div style="border-top:1px dashed oklch(90% 0.02 85);padding-top:8px;">
+            <div style="font-size:10px;font-weight:800;color:oklch(55% 0.02 100);text-transform:uppercase;margin-bottom:3px;">Merienda (opcional)</div>
+            ${snackMeals.map(meal => {
+              const memberName = meal.member_id ? ((members.find(m => m.id === meal.member_id) || {}).name || '—') : 'Todo el hogar';
+              return `
+                <div style="background:oklch(93% 0.02 85);border-radius:8px;padding:6px 8px;display:flex;flex-direction:column;gap:2px;margin-bottom:4px;">
+                  <div style="display:flex;justify-content:space-between;gap:6px;align-items:flex-start;">
+                    <div style="font-size:11px;font-weight:800;">${esc((s.recipes.find(r => r.id === meal.recipe_id) || {}).name || 'Receta')}</div>
+                    <button data-action="removeMeal" data-id="${esc(meal.id)}" style="background:none;border:none;color:oklch(45% 0.02 100);cursor:pointer;font-size:12px;line-height:1;padding:0;">×</button>
+                  </div>
+                  <div style="font-size:9px;color:oklch(55% 0.02 100);">${esc(memberName)}${meal.estimated_kcal != null ? ` · ~${meal.estimated_kcal} kcal` : ''}</div>
+                </div>
+              `;
+            }).join('')}
+            ${s.snackFormOpenFor === dateISO ? `
+              <div style="background:oklch(97% 0.018 85);border-radius:8px;padding:8px;">
+                <select data-bind="snackDraft.recipeId" style="width:100%;padding:5px 6px;border-radius:6px;border:1px solid oklch(88% 0.02 85);font-size:11px;margin-bottom:4px;">
+                  <option value="">Elegir receta...</option>
+                  ${s.recipes.map(r => `<option value="${esc(r.id)}" ${s.snackDraft.recipeId === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
+                </select>
+                <select data-bind="snackDraft.memberId" style="width:100%;padding:5px 6px;border-radius:6px;border:1px solid oklch(88% 0.02 85);font-size:11px;margin-bottom:4px;">
+                  <option value="">Todo el hogar</option>
+                  ${members.map(m => `<option value="${esc(m.id)}" ${s.snackDraft.memberId === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}
+                </select>
+                <div style="display:flex;gap:4px;">
+                  <button data-action="confirmAddSnack" data-day="${dateISO}" style="flex:1;background:oklch(68% 0.17 55);color:white;border:none;border-radius:6px;padding:5px;font-weight:800;font-size:10px;cursor:pointer;">Agregar</button>
+                  <button data-action="cancelSnackForm" style="background:oklch(90% 0.02 85);border:none;border-radius:6px;padding:5px 8px;font-weight:700;font-size:10px;cursor:pointer;">Cancelar</button>
+                </div>
+              </div>
+            ` : `
+              <button data-action="openSnackForm" data-day="${dateISO}" style="width:100%;background:transparent;border:1px dashed oklch(80% 0.02 85);color:oklch(50% 0.02 100);border-radius:7px;padding:5px;font-weight:700;font-size:10px;cursor:pointer;">+ Merienda</button>
+            `}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
 
   return `
     <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:14px;margin-bottom:20px;">
       <div>
-        <h1 style="font-family:'Nunito',sans-serif;font-weight:900;font-size:26px;margin:0 0 4px;">Plan semanal</h1>
-        <p style="color:oklch(55% 0.02 100);margin:0;font-size:14px;">Semana del ${esc(s.weekStart)}.</p>
+        <h1 style="font-family:'Nunito',sans-serif;font-weight:900;font-size:26px;margin:0 0 4px;">Plan de compras</h1>
+        <p style="color:oklch(55% 0.02 100);margin:0;font-size:14px;">Desayuno, almuerzo y cena son obligatorios; la merienda es opcional y puede ser solo para una persona.</p>
       </div>
-      ${!s.planId ? `<button data-action="createPlan" ${s.creatingPlan ? 'disabled' : ''} style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">${s.creatingPlan ? 'Creando...' : 'Crear plan semanal'}</button>` : ''}
     </div>
+
+    ${!hasPlan ? `
+      <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;padding:22px;margin-bottom:20px;">
+        <div style="font-weight:800;font-size:16px;margin-bottom:14px;font-family:'Nunito',sans-serif;">Crear plan</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:14px;">
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);">Fecha de inicio
+            <input type="date" value="${esc(s.planForm.start_date)}" data-bind="planForm.start_date" style="padding:9px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+          </label>
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);">Duración
+            <select data-bind="planForm.duration" style="padding:9px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;">
+              ${DURATION_OPTIONS.map(d => `<option value="${d.key}" ${s.planForm.duration === d.key ? 'selected' : ''}>${d.label}</option>`).join('')}
+            </select>
+          </label>
+          ${s.planForm.duration === 'custom' ? `
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);">Fecha final
+              <input type="date" value="${esc(s.planForm.custom_end_date)}" data-bind="planForm.custom_end_date" style="padding:9px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+            </label>
+          ` : ''}
+        </div>
+        <button data-action="createPlan" ${s.creatingPlan ? 'disabled' : ''} style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">${s.creatingPlan ? 'Creando...' : 'Crear plan'}</button>
+      </div>
+    ` : ''}
 
     ${s.recipes.length === 0 ? `<div style="background:oklch(96% 0.04 55);border:1px solid oklch(85% 0.08 55);border-radius:12px;padding:14px 18px;font-size:13px;color:oklch(40% 0.1 55);margin-bottom:16px;">Añade recetas primero en la pestaña Recetas para poder asignarlas al plan.</div>` : ''}
 
-    ${s.planId ? `
-      <div style="overflow-x:auto;border-radius:16px;border:1px solid oklch(90% 0.02 85);">
-        <div style="display:grid;grid-template-columns:110px repeat(7,minmax(160px,1fr));min-width:1280px;">
-          <div style="background:oklch(99% 0.006 85);padding:12px;font-weight:800;font-size:13px;border-bottom:1px solid oklch(90% 0.02 85);"></div>
-          ${DAYS.map(day => `<div style="background:oklch(99% 0.006 85);padding:12px;font-weight:800;font-size:13px;text-align:center;border-bottom:1px solid oklch(90% 0.02 85);border-left:1px solid oklch(90% 0.02 85);font-family:'Nunito',sans-serif;">${day}</div>`).join('')}
-
-          ${mealRows.map(row => `
-            <div style="background:oklch(97% 0.018 85);padding:12px;font-weight:800;font-size:13px;display:flex;align-items:center;border-bottom:1px solid oklch(90% 0.02 85);">${row.label}</div>
-            ${row.cells.map(cell => `
-              <div style="padding:10px;border-bottom:1px solid oklch(90% 0.02 85);border-left:1px solid oklch(90% 0.02 85);background:oklch(99% 0.006 85);display:flex;flex-direction:column;gap:6px;">
-                ${cell.assigned ? `
-                  <div style="background:oklch(94% 0.04 152);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:4px;">
-                    <div style="display:flex;justify-content:space-between;gap:6px;align-items:flex-start;">
-                      <div style="font-size:12px;font-weight:800;color:oklch(30% 0.08 152);">${esc(cell.recipeName)}</div>
-                      <button data-action="removeMeal" data-id="${esc(cell.mealId)}" style="background:none;border:none;color:oklch(45% 0.08 152);cursor:pointer;font-size:13px;line-height:1;padding:0;">×</button>
-                    </div>
-                    <div style="font-size:11px;color:oklch(40% 0.05 152);">${esc(cell.servingsLabel)}</div>
-                  </div>
-                ` : `
-                  <select data-change-action="setCellDraftRecipe" data-day="${cell.dayIdx}" data-mealkey="${cell.mealKey}" style="padding:6px 8px;border-radius:8px;border:1px solid oklch(88% 0.02 85);font-size:12px;">
-                    <option value="">Elegir receta...</option>
-                    ${s.recipes.map(r => `<option value="${esc(r.id)}" ${cell.draftRecipeId === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
-                  </select>
-                  <div style="display:flex;gap:6px;align-items:center;">
-                    <input type="number" min="1" value="${esc(cell.draftServings)}" data-change-action="setCellDraftServings" data-day="${cell.dayIdx}" data-mealkey="${cell.mealKey}" style="width:56px;padding:6px 8px;border-radius:8px;border:1px solid oklch(88% 0.02 85);font-size:12px;" />
-                    <button data-action="assignMeal" data-day="${cell.dayIdx}" data-mealkey="${cell.mealKey}" style="background:oklch(68% 0.17 55);color:white;border:none;border-radius:8px;padding:6px 10px;font-weight:800;font-size:11px;cursor:pointer;">Asignar</button>
-                  </div>
-                `}
-              </div>
-            `).join('')}
-          `).join('')}
-        </div>
+    ${hasPlan ? `
+      <div style="overflow-x:auto;">
+        <div style="display:flex;gap:10px;padding-bottom:8px;">${dayColumns}</div>
       </div>
     ` : ''}
   `;
@@ -705,21 +932,27 @@ function viewLista() {
     const cost = item.estimated_cost ?? item.cost ?? null;
     const store = item.cheaper_store || item.store || item.best_store || '—';
     const checked = !!(item.is_checked ?? item.checked ?? item.purchased);
-    return { id: item.id, name, checked, quantityLabel: `${qty} ${unit}`.trim(), costLabel: cost != null ? `$${Number(cost).toFixed(2)}` : '—', store };
+    return { id: item.id, name, checked, quantityLabel: `${qty} ${unit}`.trim(), costLabel: cost != null ? `$${Number(cost).toFixed(2)}` : '—', cost, store };
   });
+  const totalCost = shoppingItems.reduce((sum, i) => sum + (i.cost || 0), 0);
+  const budget = s.household ? s.household.budget : null;
 
   return `
     <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:14px;margin-bottom:20px;">
       <div>
         <h1 style="font-family:'Nunito',sans-serif;font-weight:900;font-size:26px;margin:0 0 4px;">Lista de compras</h1>
-        <p style="color:oklch(55% 0.02 100);margin:0;font-size:14px;">Generada a partir de tu plan semanal.</p>
+        <p style="color:oklch(55% 0.02 100);margin:0;font-size:14px;">Generada a partir de tu plan.</p>
       </div>
       ${s.planId ? `<button data-action="generateList" ${s.generatingList ? 'disabled' : ''} style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">${s.generatingList ? 'Generando...' : 'Generar lista'}</button>` : ''}
     </div>
 
-    ${!s.planId ? `<div style="background:oklch(96% 0.04 55);border:1px solid oklch(85% 0.08 55);border-radius:12px;padding:14px 18px;font-size:13px;color:oklch(40% 0.1 55);">Primero crea un plan semanal en la pestaña anterior.</div>` : ''}
+    ${!s.planId ? `<div style="background:oklch(96% 0.04 55);border:1px solid oklch(85% 0.08 55);border-radius:12px;padding:14px 18px;font-size:13px;color:oklch(40% 0.1 55);">Primero crea un plan en la pestaña anterior.</div>` : ''}
 
     ${shoppingItems.length > 0 ? `
+      <div style="background:oklch(94% 0.04 152);border:1px solid oklch(80% 0.08 152);border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <div style="font-size:14px;font-weight:800;color:oklch(30% 0.08 152);">Costo estimado total: $${totalCost.toFixed(2)}</div>
+        ${budget ? `<div style="font-size:12px;color:oklch(40% 0.08 152);">Presupuesto mensual del hogar: $${Number(budget).toFixed(2)}</div>` : ''}
+      </div>
       <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;overflow:hidden;">
         <div style="display:grid;grid-template-columns:34px 1.6fr 1fr 1fr 1.1fr;padding:12px 16px;background:oklch(97% 0.018 85);font-size:12px;font-weight:800;color:oklch(50% 0.02 100);">
           <div></div><div>Ingrediente</div><div>Cantidad</div><div>Costo est.</div><div>Más barato en</div>
@@ -735,7 +968,7 @@ function viewLista() {
         `).join('')}
       </div>
     ` : ''}
-    ${shoppingItems.length === 0 && s.planId ? `<div style="text-align:center;padding:50px 20px;color:oklch(55% 0.02 100);font-size:14px;">Aún no hay lista generada para esta semana.</div>` : ''}
+    ${shoppingItems.length === 0 && s.planId ? `<div style="text-align:center;padding:50px 20px;color:oklch(55% 0.02 100);font-size:14px;">Aún no hay lista generada para este plan.</div>` : ''}
   `;
 }
 
@@ -743,18 +976,17 @@ function viewIngredientes() {
   const s = state;
   const ingredientRows = s.ingredients.map(ing => {
     const linkCount = (ing.product_links || []).length;
-    return { id: ing.id, name: ing.name, default_unit: ing.default_unit, linksLabel: linkCount > 0 ? `${linkCount} producto(s) vinculado(s)` : 'sin vincular', isSearching: s.searchingIngredientId === ing.id };
+    return { id: ing.id, name: ing.name, default_unit: ing.default_unit, category: ing.category, exclude_keywords: ing.exclude_keywords, linksLabel: linkCount > 0 ? `${linkCount} producto(s) vinculado(s)` : 'sin vincular', isSearching: s.searchingIngredientId === ing.id };
   });
-  const productResults = s.productResults.map(p => ({ id: p.id, name: p.name, store: p.store, priceLabel: Number(p.price).toFixed(2) }));
 
   return `
     <h1 style="font-family:'Nunito',sans-serif;font-weight:900;font-size:26px;margin:0 0 4px;">Ingredientes</h1>
-    <p style="color:oklch(55% 0.02 100);margin:0 0 22px;font-size:14px;">Vincula cada ingrediente propio a un producto real de Super99 o Riba Smith para que la lista de compras pueda calcular el precio más barato.</p>
+    <p style="color:oklch(55% 0.02 100);margin:0 0 22px;font-size:14px;">Vincula cada ingrediente propio a un producto real de Super99 o Riba Smith. Usa "excluir palabras" para que ingredientes parecidos no se confundan (ej: que "arroz" no traiga "arroz con leche").</p>
 
     <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:16px;padding:18px;margin-bottom:20px;">
       <div style="font-weight:800;font-size:14px;margin-bottom:10px;">Nuevo ingrediente</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-        <input placeholder="Ej: leche entera" value="${esc(s.newIngredient.name)}" data-bind="newIngredient.name" style="flex:1;min-width:180px;padding:10px 12px;border-radius:9px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
+        <input placeholder="Ej: arroz blanco" value="${esc(s.newIngredient.name)}" data-bind="newIngredient.name" style="flex:1;min-width:180px;padding:10px 12px;border-radius:9px;border:1px solid oklch(88% 0.02 85);font-size:14px;" />
         <select data-bind="newIngredient.default_unit" style="padding:10px 12px;border-radius:9px;border:1px solid oklch(88% 0.02 85);font-size:14px;">
           <option value="g" ${s.newIngredient.default_unit === 'g' ? 'selected' : ''}>gramos (g)</option>
           <option value="ml" ${s.newIngredient.default_unit === 'ml' ? 'selected' : ''}>mililitros (ml)</option>
@@ -775,21 +1007,10 @@ function viewIngredientes() {
               </div>
               <button data-action="toggleIngredientSearch" data-id="${esc(ing.id)}" style="background:transparent;border:1px solid oklch(48% 0.13 152);color:oklch(40% 0.11 152);border-radius:8px;padding:7px 14px;font-weight:700;font-size:13px;cursor:pointer;">${ing.isSearching ? 'Cerrar' : 'Vincular producto'}</button>
             </div>
-            ${ing.isSearching ? `
-              <div style="margin-top:12px;border-top:1px solid oklch(92% 0.015 85);padding-top:12px;">
-                <div style="display:flex;gap:8px;margin-bottom:10px;">
-                  <input placeholder="Buscar producto (ej: leche)" value="${esc(s.productQuery)}" data-bind="productQuery" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid oklch(88% 0.02 85);font-size:13px;" />
-                  <button data-action="searchProducts" ${s.searchingProducts ? 'disabled' : ''} style="background:oklch(93% 0.02 85);border:1px solid oklch(85% 0.02 85);border-radius:8px;padding:9px 16px;font-weight:700;font-size:13px;cursor:pointer;">${s.searchingProducts ? 'Buscando...' : 'Buscar'}</button>
-                </div>
-                ${productResults.map(p => `
-                  <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid oklch(94% 0.01 85);font-size:13px;">
-                    <div style="flex:1;">${esc(p.name)} <span style="color:oklch(55% 0.02 100);">(${esc(p.store)})</span></div>
-                    <div style="font-weight:800;margin:0 12px;">$${esc(p.priceLabel)}</div>
-                    <button data-action="linkProduct" data-ingredient-id="${esc(ing.id)}" data-product-id="${esc(p.id)}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:7px;padding:6px 12px;font-weight:700;font-size:12px;cursor:pointer;">Vincular</button>
-                  </div>
-                `).join('')}
-              </div>
-            ` : ''}
+            <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+              <input placeholder="excluir palabras (ej: con leche, dulce)" value="${esc(ing.exclude_keywords || '')}" data-change-action="setIngredientExclude" data-id="${esc(ing.id)}" style="flex:1;min-width:180px;padding:6px 9px;border-radius:7px;border:1px solid oklch(88% 0.02 85);font-size:12px;" />
+            </div>
+            ${ing.isSearching ? productSearchPanel(s.ingredients.find(i => i.id === ing.id), s) : ''}
           </div>
         `).join('')}
       </div>
@@ -867,13 +1088,13 @@ function render() {
       <nav style="display:flex;gap:8px;flex-wrap:wrap;padding:14px 24px;background:oklch(99% 0.006 85);border-bottom:1px solid oklch(90% 0.02 85);">
         <button data-action="goHogar" style="${tabStyle(s.view === 'hogar')}"><span style="${tabNumStyle(s.view === 'hogar')}">1</span> Hogar</button>
         <button data-action="goRecetas" style="${tabStyle(s.view === 'recetas')}"><span style="${tabNumStyle(s.view === 'recetas')}">2</span> Recetas</button>
-        <button data-action="goPlan" style="${tabStyle(s.view === 'plan')}"><span style="${tabNumStyle(s.view === 'plan')}">3</span> Plan semanal</button>
+        <button data-action="goPlan" style="${tabStyle(s.view === 'plan')}"><span style="${tabNumStyle(s.view === 'plan')}">3</span> Plan</button>
         <button data-action="goLista" style="${tabStyle(s.view === 'lista')}"><span style="${tabNumStyle(s.view === 'lista')}">4</span> Lista de compras</button>
         <button data-action="goIngredientes" style="${tabStyle(s.view === 'ingredientes')}"><span style="${tabNumStyle(s.view === 'ingredientes')}">5</span> Ingredientes</button>
         <button data-action="goComparar" style="${tabStyle(s.view === 'comparar')}"><span style="${tabNumStyle(s.view === 'comparar')}">6</span> Comparar</button>
       </nav>
 
-      <main style="flex:1;padding:28px 24px 60px;max-width:1100px;width:100%;margin:0 auto;">
+      <main style="flex:1;padding:28px 24px 60px;max-width:1300px;width:100%;margin:0 auto;">
         ${mainHtml}
       </main>
     </div>
@@ -881,7 +1102,7 @@ function render() {
 }
 
 // ============================================================
-// DELEGACIÓN DE EVENTOS (un solo listener para toda la app)
+// DELEGACIÓN DE EVENTOS
 // ============================================================
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
@@ -898,7 +1119,10 @@ document.addEventListener('click', (e) => {
     case 'linkProduct': actions.linkProduct(ingredientId, productId); break;
     case 'deleteRecipe': actions.deleteRecipe(id); break;
     case 'removeMeal': actions.removeMeal(id); break;
-    case 'assignMeal': actions.assignMeal(Number(day), mealkey); break;
+    case 'assignMeal': actions.assignMeal(day, mealkey); break;
+    case 'previewExternalRecipe': actions.previewExternalRecipe(id); break;
+    case 'openSnackForm': actions.openSnackForm(day); break;
+    case 'confirmAddSnack': actions.confirmAddSnack(day); break;
     default:
       if (actions[name]) actions[name]();
   }
@@ -907,15 +1131,12 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', (e) => {
   const el = e.target;
 
-  // Binding genérico de formularios: data-bind="path.a.b"
   const bindPath = el.getAttribute('data-bind');
   if (bindPath) {
-    let value = el.value;
-    setState(s => { setPath(s, bindPath, value); return s; });
+    setState(s => { setPath(s, bindPath, el.value); return s; });
     return;
   }
 
-  // Acciones especiales con parámetros extra
   const changeAction = el.getAttribute('data-change-action');
   if (!changeAction) return;
 
@@ -926,17 +1147,21 @@ document.addEventListener('change', (e) => {
   } else if (changeAction === 'setCellDraftRecipe') {
     const day = el.getAttribute('data-day');
     const mealkey = el.getAttribute('data-mealkey');
-    const key = cellKey(Number(day), mealkey);
+    const key = cellKey(day, mealkey, '');
     setState(s => ({ cellDrafts: { ...s.cellDrafts, [key]: { ...(s.cellDrafts[key] || {}), recipeId: el.value } } }));
   } else if (changeAction === 'setCellDraftServings') {
     const day = el.getAttribute('data-day');
     const mealkey = el.getAttribute('data-mealkey');
-    const key = cellKey(Number(day), mealkey);
+    const key = cellKey(day, mealkey, '');
     setState(s => ({ cellDrafts: { ...s.cellDrafts, [key]: { ...(s.cellDrafts[key] || {}), servings: el.value } } }));
   } else if (changeAction === 'toggleItemChecked') {
     const id = el.getAttribute('data-id');
     const checked = el.getAttribute('data-checked') === 'true';
     actions.toggleItemChecked(id, checked);
+  } else if (changeAction === 'setIngredientExclude') {
+    const id = el.getAttribute('data-id');
+    const ing = state.ingredients.find(i => i.id === id);
+    api(`/ingredients/${id}`, { method: 'PATCH', body: JSON.stringify({ name: ing.name, default_unit: ing.default_unit, category: ing.category, exclude_keywords: el.value }) }).then(() => loadIngredients());
   }
 });
 

@@ -64,7 +64,7 @@ class Household(Base):
 
     members = relationship("Member", back_populates="household", cascade="all, delete-orphan")
     dietary_rules = relationship("DietaryRule", back_populates="household", cascade="all, delete-orphan")
-    weekly_plans = relationship("WeeklyPlan", back_populates="household", cascade="all, delete-orphan")
+    plans = relationship("Plan", back_populates="household", cascade="all, delete-orphan")
 
 
 class Member(Base):
@@ -85,8 +85,8 @@ class DietaryRule(Base):
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
     household_id = Column(UUID(as_uuid=False), ForeignKey("households.id"), nullable=False)
     rule_type = Column(Enum(DietaryRuleType), nullable=False)
-    value = Column(String, nullable=False)  # ej: "mani", "lactosa"
-    is_hard = Column(Boolean, default=True)  # restriccion dura vs blanda (preferencia)
+    value = Column(String, nullable=False)
+    is_hard = Column(Boolean, default=True)
 
     household = relationship("Household", back_populates="dietary_rules")
 
@@ -97,7 +97,7 @@ class StoreProduct(Base):
     __tablename__ = "store_products"
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
-    store = Column(String, nullable=False, index=True)  # super99 / ribasmith
+    store = Column(String, nullable=False, index=True)
     sku = Column(String, nullable=False, index=True)
     category = Column(String, nullable=True)
     name = Column(String, nullable=False)
@@ -113,18 +113,26 @@ class StoreProduct(Base):
 # ---------- Ingredientes propios ----------
 
 class Ingredient(Base):
+    """
+    category: categoría amplia (ej: "cereales", "lacteos") — informativa.
+    exclude_keywords: palabras separadas por coma que, si aparecen en el nombre
+        de un producto del catálogo, lo EXCLUYEN de los resultados de búsqueda
+        para este ingrediente. Ej: el ingrediente "Arroz blanco" puede tener
+        exclude_keywords="con leche,dulce,postre" para que al buscar productos
+        no aparezcan mezclados con "Arroz con leche".
+    """
     __tablename__ = "ingredients"
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
     name = Column(String, nullable=False, unique=True)
-    default_unit = Column(String, nullable=False, default="g")  # g, ml, unidad
+    default_unit = Column(String, nullable=False, default="g")
     category = Column(String, nullable=True)
+    exclude_keywords = Column(String, nullable=True)
 
     product_links = relationship("IngredientProductLink", back_populates="ingredient", cascade="all, delete-orphan")
 
 
 class IngredientProductLink(Base):
-    """Vínculo manual: qué producto(s) del catálogo de supermercados corresponden a este ingrediente."""
     __tablename__ = "ingredient_product_links"
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
@@ -144,8 +152,8 @@ class Recipe(Base):
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
     name = Column(String, nullable=False)
     source = Column(Enum(RecipeSource), default=RecipeSource.manual)
-    source_url = Column(Text, nullable=True)  # si fue importada
-    servings = Column(Integer, nullable=False, default=4)  # porciones "base" de la receta
+    source_url = Column(Text, nullable=True)
+    servings = Column(Integer, nullable=False, default=4)
     instructions = Column(Text, nullable=True)
     prep_time_minutes = Column(Integer, nullable=True)
     image_url = Column(Text, nullable=True)
@@ -159,10 +167,10 @@ class RecipeIngredient(Base):
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
     recipe_id = Column(UUID(as_uuid=False), ForeignKey("recipes.id"), nullable=False)
-    raw_text = Column(String, nullable=False)  # tal cual viene: "2 tazas de leche"
+    raw_text = Column(String, nullable=False)
     quantity = Column(Float, nullable=True)
     unit = Column(String, nullable=True)
-    ingredient_id = Column(UUID(as_uuid=False), ForeignKey("ingredients.id"), nullable=True)  # null hasta vincular
+    ingredient_id = Column(UUID(as_uuid=False), ForeignKey("ingredients.id"), nullable=True)
 
     recipe = relationship("Recipe", back_populates="ingredients")
     ingredient = relationship("Ingredient")
@@ -170,29 +178,45 @@ class RecipeIngredient(Base):
 
 # ---------- Planificación ----------
 
-class WeeklyPlan(Base):
-    __tablename__ = "weekly_plans"
+class Plan(Base):
+    """
+    Antes era "WeeklyPlan" con solo week_start (siempre 7 días fijos).
+    Ahora es un rango de fechas arbitrario: start_date .. end_date,
+    para poder planificar 3 días, 1 semana, 2 semanas, lo que sea.
+    """
+    __tablename__ = "plans"
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
     household_id = Column(UUID(as_uuid=False), ForeignKey("households.id"), nullable=False)
-    week_start = Column(Date, nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
 
-    household = relationship("Household", back_populates="weekly_plans")
+    household = relationship("Household", back_populates="plans")
     meals = relationship("PlanMeal", back_populates="plan", cascade="all, delete-orphan")
 
 
 class PlanMeal(Base):
+    """
+    member_id: si es null, la comida es para todo el hogar (lo normal para
+        desayuno/almuerzo/cena). Si tiene valor, es una comida individual
+        (ej: la merienda de un solo integrante).
+    is_required: desayuno/almuerzo/cena son obligatorios por defecto;
+        snack es opcional. Es solo informativo para la UI.
+    """
     __tablename__ = "plan_meals"
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
-    plan_id = Column(UUID(as_uuid=False), ForeignKey("weekly_plans.id"), nullable=False)
+    plan_id = Column(UUID(as_uuid=False), ForeignKey("plans.id"), nullable=False)
     recipe_id = Column(UUID(as_uuid=False), ForeignKey("recipes.id"), nullable=False)
     day = Column(Date, nullable=False)
     meal_type = Column(Enum(MealType), nullable=False)
-    servings_override = Column(Integer, nullable=True)  # si es null, se usa recipe.servings
+    member_id = Column(UUID(as_uuid=False), ForeignKey("members.id"), nullable=True)
+    is_required = Column(Boolean, default=True)
+    servings_override = Column(Integer, nullable=True)
 
-    plan = relationship("WeeklyPlan", back_populates="meals")
+    plan = relationship("Plan", back_populates="meals")
     recipe = relationship("Recipe")
+    member = relationship("Member")
 
 
 # ---------- Lista de compras (siempre derivada del plan) ----------
@@ -201,7 +225,7 @@ class ShoppingListItem(Base):
     __tablename__ = "shopping_list_items"
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
-    plan_id = Column(UUID(as_uuid=False), ForeignKey("weekly_plans.id"), nullable=False)
+    plan_id = Column(UUID(as_uuid=False), ForeignKey("plans.id"), nullable=False)
     ingredient_id = Column(UUID(as_uuid=False), ForeignKey("ingredients.id"), nullable=False)
     quantity_needed = Column(Float, nullable=False)
     unit = Column(String, nullable=False)
@@ -209,6 +233,6 @@ class ShoppingListItem(Base):
     estimated_cost = Column(Float, nullable=True)
     is_checked = Column(Boolean, default=False)
 
-    plan = relationship("WeeklyPlan")
+    plan = relationship("Plan")
     ingredient = relationship("Ingredient")
     cheapest_store_product = relationship("StoreProduct")

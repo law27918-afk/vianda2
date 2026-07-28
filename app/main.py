@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.database import Base, engine
-from app.routers import households, recipes, ingredients, planning, shopping
+from app.routers import households, recipes, external_recipes, ingredients, planning, shopping
 
 Base.metadata.create_all(bind=engine)
 
@@ -17,6 +17,7 @@ app.add_middleware(
 
 app.include_router(households.router)
 app.include_router(recipes.router)
+app.include_router(external_recipes.router)
 app.include_router(ingredients.router)
 app.include_router(planning.router)
 app.include_router(shopping.router)

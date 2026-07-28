@@ -12,7 +12,8 @@ def list_recipes(q: str | None = None, db: Session = Depends(get_db)):
     query = db.query(models.Recipe)
     if q:
         query = query.filter(models.Recipe.name.ilike(f"%{q}%"))
-    return query.order_by(models.Recipe.created_at.desc()).all()
+    recipes = query.order_by(models.Recipe.created_at.desc()).all()
+    return [schemas.RecipeOut.from_orm_recipe(r) for r in recipes]
 
 
 @router.get("/{recipe_id}", response_model=schemas.RecipeOut)
@@ -20,12 +21,11 @@ def get_recipe(recipe_id: str, db: Session = Depends(get_db)):
     recipe = db.query(models.Recipe).get(recipe_id)
     if not recipe:
         raise HTTPException(404, "Receta no encontrada")
-    return recipe
+    return schemas.RecipeOut.from_orm_recipe(recipe)
 
 
 @router.post("/", response_model=schemas.RecipeOut)
 def create_recipe(payload: schemas.RecipeCreate, db: Session = Depends(get_db)):
-    """Alta manual de receta, con sus ingredientes como texto libre."""
     recipe = models.Recipe(
         name=payload.name,
         source=models.RecipeSource.manual,
@@ -48,17 +48,12 @@ def create_recipe(payload: schemas.RecipeCreate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(recipe)
-    return recipe
+    return schemas.RecipeOut.from_orm_recipe(recipe)
 
 
 @router.post("/import", response_model=schemas.RecipeOut)
 def import_recipe(payload: schemas.RecipeImportRequest, db: Session = Depends(get_db)):
-    """
-    Importa una receta desde una URL usando recipe-scrapers, que lee el
-    JSON-LD (schema.org/Recipe) que casi todo sitio de recetas incluye.
-    Los ingredientes quedan como texto libre (raw_text); vincularlos a
-    `ingredients` del catálogo propio se hace después, a mano, desde la UI.
-    """
+    """Importa una receta desde una URL usando recipe-scrapers (JSON-LD schema.org/Recipe)."""
     try:
         from recipe_scrapers import scrape_me
     except ImportError:
@@ -107,12 +102,11 @@ def import_recipe(payload: schemas.RecipeImportRequest, db: Session = Depends(ge
 
     db.commit()
     db.refresh(recipe)
-    return recipe
+    return schemas.RecipeOut.from_orm_recipe(recipe)
 
 
 @router.patch("/{recipe_id}/ingredients/{recipe_ingredient_id}", response_model=schemas.RecipeIngredientOut)
 def link_recipe_ingredient(recipe_id: str, recipe_ingredient_id: str, payload: schemas.RecipeIngredientLink, db: Session = Depends(get_db)):
-    """Vincula una línea de ingrediente de receta (texto libre) a un ingrediente del catálogo propio."""
     ri = (
         db.query(models.RecipeIngredient)
         .filter(models.RecipeIngredient.id == recipe_ingredient_id, models.RecipeIngredient.recipe_id == recipe_id)
