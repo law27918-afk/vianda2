@@ -182,12 +182,12 @@ async function init() {
 }
 
 async function loadIngredients() {
-  const r = await api('/ingredients');
+  const r = await api('/ingredients/');
   if (r.ok && Array.isArray(r.data)) setState({ ingredients: r.data });
 }
 
 async function loadHouseholds(preferId) {
-  const r = await api('/households');
+  const r = await api('/households/');
   if (r.ok && Array.isArray(r.data)) {
     let h = r.data.find(x => String(x.id) === String(preferId)) || r.data[0] || null;
     if (h) {
@@ -202,7 +202,7 @@ async function loadHouseholds(preferId) {
 }
 
 async function loadRecipes() {
-  const r = await api('/recipes');
+  const r = await api('/recipes/');
   if (r.ok && Array.isArray(r.data)) setState({ recipes: r.data });
 }
 
@@ -232,7 +232,7 @@ const actions = {
     const n = state.newIngredient;
     if (!n.name.trim()) return;
     setState({ savingIngredient: true });
-    const r = await api('/ingredients', { method: 'POST', body: JSON.stringify(n) });
+    const r = await api('/ingredients/', { method: 'POST', body: JSON.stringify(n) });
     if (r.ok) {
       setState(s => ({
         ingredients: [...s.ingredients, r.data || { ...n, id: Date.now().toString(), product_links: [] }],
@@ -288,7 +288,7 @@ const actions = {
     if (state.household) {
       r = await api(`/households/${state.household.id}`, { method: 'PATCH', body: JSON.stringify(body) });
     } else {
-      r = await api('/households', { method: 'POST', body: JSON.stringify(body) });
+      r = await api('/households/', { method: 'POST', body: JSON.stringify(body) });
     }
     if (r.ok && r.data) {
       localStorage.setItem('vianda_household_id', r.data.id);
@@ -316,7 +316,7 @@ const actions = {
     setState({ savingRecipe: true });
     const ingredients = n.ingredientsText.split('\n').map(parseIngredientLine).filter(Boolean);
     const body = { name: n.name, servings: parseInt(n.servings) || 1, instructions: n.instructions, ingredients };
-    const r = await api('/recipes', { method: 'POST', body: JSON.stringify(body) });
+    const r = await api('/recipes/', { method: 'POST', body: JSON.stringify(body) });
     if (r.ok) {
       setState(s => ({
         recipes: [...s.recipes, r.data || body],
@@ -351,7 +351,7 @@ const actions = {
     setState({ savingRecipe: true });
     const ingredients = d.ingredientsText.split('\n').map(parseIngredientLine).filter(Boolean);
     const body = { name: d.name, servings: parseInt(d.servings) || 1, instructions: d.instructions, ingredients };
-    const r = await api('/recipes', { method: 'POST', body: JSON.stringify(body) });
+    const r = await api('/recipes/', { method: 'POST', body: JSON.stringify(body) });
     if (r.ok) {
       setState(s => ({
         recipes: [...s.recipes, r.data || body],
@@ -381,7 +381,7 @@ const actions = {
     const h = state.household;
     if (!h) { setState({ apiError: 'Configura tu hogar primero.' }); return; }
     setState({ creatingPlan: true });
-    const r = await api('/plans', { method: 'POST', body: JSON.stringify({ household_id: h.id, week_start: state.weekStart }) });
+    const r = await api('/plans/', { method: 'POST', body: JSON.stringify({ household_id: h.id, week_start: state.weekStart }) });
     if (r.ok && r.data) {
       localStorage.setItem('vianda_plan_id', r.data.id);
       setState({ planId: r.data.id, meals: r.data.meals || [] });
