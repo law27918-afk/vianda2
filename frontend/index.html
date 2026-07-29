@@ -196,7 +196,20 @@ async function api(path, opts = {}) {
     });
     if (!res.ok) {
       let msg = `Error ${res.status}`;
-      try { const j = await res.json(); msg = j.detail || j.message || msg; } catch (e) {}
+      try {
+        const j = await res.json();
+        if (Array.isArray(j.detail)) {
+          // Errores de validación de FastAPI/Pydantic: [{loc, msg, type}, ...]
+          msg = j.detail.map(d => {
+            const field = Array.isArray(d.loc) ? d.loc[d.loc.length - 1] : '';
+            return field ? `${field}: ${d.msg}` : d.msg;
+          }).join(' · ');
+        } else if (typeof j.detail === 'string') {
+          msg = j.detail;
+        } else if (j.message) {
+          msg = j.message;
+        }
+      } catch (e) {}
       setState({ apiError: msg });
       return { ok: false, error: msg };
     }
@@ -448,8 +461,18 @@ const actions = {
     if (r.ok) setState(s => ({ recipes: s.recipes.filter(x => x.id !== id) }));
   },
 
-  linkRecipeIngredient: async (recipeId, recipeIngredientId, ingredientId) => {
+  linkRecipeIngredient: async (recipeId, recipeIngredientId, ingredientId, suggestedName) => {
     if (!ingredientId) return;
+
+    if (ingredientId === '__new__') {
+      const name = (window.prompt('Nombre del ingrediente para tu catálogo:', suggestedName || '') || '').trim();
+      if (!name) return;
+      const createRes = await api('/ingredients/', { method: 'POST', body: JSON.stringify({ name, default_unit: 'g' }) });
+      if (!createRes.ok || !createRes.data) return;
+      ingredientId = createRes.data.id;
+      setState(s => ({ ingredients: [...s.ingredients, createRes.data] }));
+    }
+
     const r = await api(`/recipes/${recipeId}/ingredients/${recipeIngredientId}`, {
       method: 'PATCH',
       body: JSON.stringify({ ingredient_id: ingredientId }),
@@ -642,8 +665,9 @@ function recipeIngredientRow(recipe, ri, catalogIngredientOptions, s) {
     <div style="border-top:1px solid oklch(94% 0.01 85);padding-top:8px;margin-top:8px;">
       <div style="display:flex;align-items:center;gap:6px;font-size:12px;">
         <div style="flex:1;color:oklch(45% 0.02 100);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(ri.raw_text)}</div>
-        <select data-change-action="linkRecipeIngredient" data-recipe-id="${esc(recipe.id)}" data-recipe-ingredient-id="${esc(ri.id)}" style="padding:4px 6px;border-radius:6px;border:1px solid oklch(88% 0.02 85);font-size:11px;max-width:110px;">
+        <select data-change-action="linkRecipeIngredient" data-recipe-id="${esc(recipe.id)}" data-recipe-ingredient-id="${esc(ri.id)}" data-raw-text="${esc(ri.raw_text)}" style="padding:4px 6px;border-radius:6px;border:1px solid oklch(88% 0.02 85);font-size:11px;max-width:130px;">
           <option value="">${ri.ingredient_id ? 'vinculado' : 'sin vincular'}</option>
+          <option value="__new__">+ Crear ingrediente...</option>
           ${catalogIngredientOptions.map(opt => `<option value="${esc(opt.id)}" ${String(ri.ingredient_id) === String(opt.id) ? 'selected' : ''}>${esc(opt.name)}</option>`).join('')}
         </select>
       </div>
@@ -1143,7 +1167,8 @@ document.addEventListener('change', (e) => {
   if (changeAction === 'linkRecipeIngredient') {
     const recipeId = el.getAttribute('data-recipe-id');
     const recipeIngredientId = el.getAttribute('data-recipe-ingredient-id');
-    actions.linkRecipeIngredient(recipeId, recipeIngredientId, el.value);
+    const rawText = el.getAttribute('data-raw-text');
+    actions.linkRecipeIngredient(recipeId, recipeIngredientId, el.value, rawText);
   } else if (changeAction === 'setCellDraftRecipe') {
     const day = el.getAttribute('data-day');
     const mealkey = el.getAttribute('data-mealkey');
