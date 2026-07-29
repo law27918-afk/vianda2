@@ -24,8 +24,7 @@
 // ============================================================
 // CONFIG
 // ============================================================
-
-const API_BASE_URL = "https://vianda2.onrender.com";
+const API_BASE_URL = "https://vianda-backend-production-8057.up.railway.app";
 
 const MEAL_TYPES = [
   { key: 'desayuno', label: 'Desayuno', required: true },
@@ -76,6 +75,48 @@ function ingredientsToText(ingredients) {
     parts.push(i.name || i.raw || '');
     return parts.join(' ').trim();
   }).join('\n');
+}
+
+function normalizeForMatch(str) {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+// Sugiere ingredientes del catálogo que coincidan por substring (en
+// cualquier dirección) con el nombre parseado de una línea de receta.
+// No decide nada por sí sola: solo arma la lista de opciones, la persona
+// elige cuál usar (o "Crear nuevo") en el selector de cada fila.
+function suggestIngredients(parsedName, catalogIngredients) {
+  const norm = normalizeForMatch(parsedName);
+  if (!norm) return { matches: [], rest: catalogIngredients };
+  const matches = [];
+  const rest = [];
+  for (const ing of catalogIngredients) {
+    const ingNorm = normalizeForMatch(ing.name);
+    if (ingNorm.includes(norm) || norm.includes(ingNorm)) matches.push(ing);
+    else rest.push(ing);
+  }
+  return { matches, rest };
+}
+
+function buildIngredientRows(text, catalogIngredients) {
+  const lines = text.split('\n').map(parseIngredientLine).filter(Boolean);
+  return lines.map((line, idx) => {
+    const { matches } = suggestIngredients(line.name, catalogIngredients);
+    return {
+      key: 'row_' + idx + '_' + Date.now(),
+      raw_text: line.raw_text,
+      quantity: line.quantity,
+      unit: line.unit || '',
+      name: line.name,
+      ingredientId: '__new__',
+      suggestions: matches.map(m => m.id),
+    };
+  });
 }
 
 function todayISO() {
@@ -142,7 +183,7 @@ const state = {
   showAddRecipeForm: false,
   showImportForm: false,
   showExternalSearch: false,
-  newRecipe: { name: '', servings: 4, instructions: '', ingredientsText: '' },
+  newRecipe: { name: '', servings: 4, instructions: '', ingredientsText: '', ingredientRows: null },
   importUrl: '',
   importDraft: null,
   importing: false,
@@ -397,6 +438,7 @@ const actions = {
           servings: 4,
           instructions: d.instructions || '',
           ingredientsText: ingredientsToText(d.ingredients),
+          ingredientRows: null,
         },
         showImportForm: true,
         showExternalSearch: false,
@@ -404,19 +446,99 @@ const actions = {
     }
   },
 
+  // -------- Revisión de ingredientes (paso intermedio antes de guardar) --------
+  // Convierte el texto libre en filas editables, cada una con su propio
+  // selector de ingrediente de catálogo. Nunca vincula nada solo: por
+  // defecto cada fila queda en "Crear nuevo", y si hay coincidencias por
+  // substring con el catálogo existente se muestran como opciones, pero
+  // la persona tiene que elegirlas a propósito.
+  reviewNewRecipeIngredients: () => {
+    setState(s => ({
+      newRecipe: { ...s.newRecipe, ingredientRows: buildIngredientRows(s.newRecipe.ingredientsText, s.ingredients) },
+    }));
+  },
+  backToRawNewRecipe: () => {
+    setState(s => ({ newRecipe: { ...s.newRecipe, ingredientRows: null } }));
+  },
+  setNewRecipeRowField: (idx, field, value) => {
+    setState(s => {
+      const rows = s.newRecipe.ingredientRows.slice();
+      rows[idx] = { ...rows[idx], [field]: value };
+      return { newRecipe: { ...s.newRecipe, ingredientRows: rows } };
+    });
+  },
+
+  reviewImportDraftIngredients: () => {
+    setState(s => ({
+      importDraft: { ...s.importDraft, ingredientRows: buildIngredientRows(s.importDraft.ingredientsText, s.ingredients) },
+    }));
+  },
+  backToRawImportDraft: () => {
+    setState(s => ({ importDraft: { ...s.importDraft, ingredientRows: null } }));
+  },
+  setImportDraftRowField: (idx, field, value) => {
+    setState(s => {
+      const rows = s.importDraft.ingredientRows.slice();
+      rows[idx] = { ...rows[idx], [field]: value };
+      return { importDraft: { ...s.importDraft, ingredientRows: rows } };
+    });
+  },
+
+  // Resuelve las filas revisadas a un array de ingredientes con
+  // ingredient_id ya definido, creando en catálogo solo las que la persona
+  // marcó como "Crear nuevo" (deduplicando por nombre dentro del mismo
+  // guardado, para no crear el mismo ingrediente dos veces si aparece en
+  // varias líneas de la misma receta).
+  _resolveIngredientRows: async (rows) => {
+    const createdByName = new Map();
+    const newlyCreated = [];
+    const resolved = [];
+    for (const row of rows) {
+      let ingredientId = row.ingredientId;
+      if (ingredientId === '__new__') {
+        const key = normalizeForMatch(row.name);
+        if (createdByName.has(key)) {
+          ingredientId = createdByName.get(key);
+        } else {
+          const payload = { name: row.name, default_unit: row.unit || '' };
+          const r = await api('/ingredients/', { method: 'POST', body: JSON.stringify(payload) });
+          if (r.ok && r.data) {
+            ingredientId = r.data.id;
+            createdByName.set(key, ingredientId);
+            newlyCreated.push(r.data);
+          } else {
+            ingredientId = null;
+          }
+        }
+      }
+      resolved.push({
+        raw_text: row.raw_text,
+        quantity: row.quantity,
+        unit: row.unit || null,
+        ingredient_id: ingredientId || null,
+      });
+    }
+    if (newlyCreated.length) {
+      setState(s => ({ ingredients: [...s.ingredients, ...newlyCreated] }));
+    }
+    return resolved;
+  },
+
   saveNewRecipe: async () => {
     const n = state.newRecipe;
     if (!n.name.trim()) return;
     setState({ savingRecipe: true });
-    const ingredients = n.ingredientsText.split('\n').map(parseIngredientLine).filter(Boolean);
+    const rows = n.ingredientRows || buildIngredientRows(n.ingredientsText, state.ingredients);
+    const ingredients = await actions._resolveIngredientRows(rows);
     const body = { name: n.name, servings: parseInt(n.servings) || 1, instructions: n.instructions, ingredients };
     const r = await api('/recipes/', { method: 'POST', body: JSON.stringify(body) });
     if (r.ok) {
       setState(s => ({
         recipes: [...s.recipes, r.data || body],
-        newRecipe: { name: '', servings: 4, instructions: '', ingredientsText: '' },
+        newRecipe: { name: '', servings: 4, instructions: '', ingredientsText: '', ingredientRows: null },
         showAddRecipeForm: false,
       }));
+      await loadIngredients();
     }
     setState({ savingRecipe: false });
   },
@@ -433,6 +555,7 @@ const actions = {
           servings: d.servings || 4,
           instructions: d.instructions || '',
           ingredientsText: ingredientsToText(d.ingredients),
+          ingredientRows: null,
         },
       });
     }
@@ -443,7 +566,8 @@ const actions = {
     const d = state.importDraft;
     if (!d || !d.name.trim()) return;
     setState({ savingRecipe: true });
-    const ingredients = d.ingredientsText.split('\n').map(parseIngredientLine).filter(Boolean);
+    const rows = d.ingredientRows || buildIngredientRows(d.ingredientsText, state.ingredients);
+    const ingredients = await actions._resolveIngredientRows(rows);
     const body = { name: d.name, servings: parseInt(d.servings) || 1, instructions: d.instructions, ingredients };
     const r = await api('/recipes/', { method: 'POST', body: JSON.stringify(body) });
     if (r.ok) {
@@ -453,6 +577,7 @@ const actions = {
         importUrl: '',
         showImportForm: false,
       }));
+      await loadIngredients();
     }
     setState({ savingRecipe: false });
   },
@@ -656,6 +781,31 @@ function viewHogar() {
   `;
 }
 
+function renderIngredientRowsEditor(rows, formKey, catalogIngredients) {
+  const byId = new Map(catalogIngredients.map(i => [i.id, i]));
+  return `
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px;">
+      ${rows.map((row, idx) => {
+        const matchIngs = (row.suggestions || []).map(id => byId.get(id)).filter(Boolean);
+        const matchIds = new Set(matchIngs.map(i => i.id));
+        const restIngs = catalogIngredients.filter(i => !matchIds.has(i.id));
+        return `
+          <div style="background:oklch(97% 0.018 85);border-radius:10px;padding:10px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input type="number" step="any" value="${esc(row.quantity ?? '')}" placeholder="cant." data-change-action="setRowField" data-form="${formKey}" data-idx="${idx}" data-field="quantity" style="width:64px;padding:7px 8px;border-radius:7px;border:1px solid oklch(88% 0.02 85);font-size:12px;" />
+            <input type="text" value="${esc(row.unit)}" placeholder="unidad" data-change-action="setRowField" data-form="${formKey}" data-idx="${idx}" data-field="unit" style="width:70px;padding:7px 8px;border-radius:7px;border:1px solid oklch(88% 0.02 85);font-size:12px;" />
+            <input type="text" value="${esc(row.name)}" placeholder="nombre del ingrediente" data-change-action="setRowField" data-form="${formKey}" data-idx="${idx}" data-field="name" style="flex:1;min-width:140px;padding:7px 8px;border-radius:7px;border:1px solid oklch(88% 0.02 85);font-size:12px;" />
+            <select data-change-action="setRowField" data-form="${formKey}" data-idx="${idx}" data-field="ingredientId" style="min-width:200px;padding:7px 8px;border-radius:7px;border:1px solid oklch(88% 0.02 85);font-size:12px;">
+              <option value="__new__" ${row.ingredientId === '__new__' ? 'selected' : ''}>+ Crear ingrediente nuevo</option>
+              ${matchIngs.length ? `<optgroup label="Coincidencias sugeridas">${matchIngs.map(i => `<option value="${esc(i.id)}" ${row.ingredientId === i.id ? 'selected' : ''}>${esc(i.name)}</option>`).join('')}</optgroup>` : ''}
+              ${restIngs.length ? `<optgroup label="Todos los ingredientes">${restIngs.map(i => `<option value="${esc(i.id)}" ${row.ingredientId === i.id ? 'selected' : ''}>${esc(i.name)}</option>`).join('')}</optgroup>` : ''}
+            </select>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
 function recipeIngredientRow(recipe, ri, catalogIngredientOptions, s) {
   const isLinkedToCatalog = !!ri.ingredient_id;
   const catalogIngredient = isLinkedToCatalog ? s.ingredients.find(i => i.id === ri.ingredient_id) : null;
@@ -768,10 +918,19 @@ function viewRecetas() {
             <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:14px;">Instrucciones
               <textarea data-bind="importDraft.instructions" rows="4" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;">${esc(s.importDraft.instructions)}</textarea>
             </label>
-            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:16px;">Ingredientes (uno por línea, ej: "200g pollo")
-              <textarea data-bind="importDraft.ingredientsText" rows="6" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;">${esc(s.importDraft.ingredientsText)}</textarea>
-            </label>
-            <button data-action="saveImportedRecipe" ${s.savingRecipe ? 'disabled' : ''} style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">${s.savingRecipe ? 'Guardando...' : 'Guardar receta'}</button>
+            ${!s.importDraft.ingredientRows ? `
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:16px;">Ingredientes (uno por línea, ej: "200g pollo")
+                <textarea data-bind="importDraft.ingredientsText" rows="6" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;">${esc(s.importDraft.ingredientsText)}</textarea>
+              </label>
+              <button data-action="reviewImportDraftIngredients" style="background:oklch(68% 0.17 55);color:white;border:none;border-radius:10px;padding:10px 18px;font-weight:800;font-size:14px;cursor:pointer;">Revisar ingredientes</button>
+            ` : `
+              <div style="font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:8px;">Para cada ingrediente, elegí si es uno que ya tenés en catálogo o si hay que crear uno nuevo:</div>
+              ${renderIngredientRowsEditor(s.importDraft.ingredientRows, 'importDraft', s.ingredients)}
+              <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button data-action="saveImportedRecipe" ${s.savingRecipe ? 'disabled' : ''} style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">${s.savingRecipe ? 'Guardando...' : 'Guardar receta'}</button>
+                <button data-action="backToRawImportDraft" style="background:oklch(94% 0.03 85);border:1px solid oklch(88% 0.02 85);border-radius:10px;padding:11px 18px;font-weight:700;font-size:14px;cursor:pointer;color:oklch(28% 0.03 145);">Volver a editar texto</button>
+              </div>
+            `}
           </div>
         ` : ''}
       </div>
@@ -791,11 +950,20 @@ function viewRecetas() {
         <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:14px;">Instrucciones
           <textarea data-bind="newRecipe.instructions" rows="4" placeholder="Paso a paso..." style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;">${esc(s.newRecipe.instructions)}</textarea>
         </label>
-        <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:16px;">Ingredientes (uno por línea, ej: "200g pollo")
-          <textarea data-bind="newRecipe.ingredientsText" rows="5" placeholder="200g pollo&#10;1 taza arroz&#10;2 cdas aceite" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;">${esc(s.newRecipe.ingredientsText)}</textarea>
-        </label>
-        <div style="font-size:11px;color:oklch(55% 0.02 100);margin-bottom:12px;">Después de guardar, en cada receta vas a poder vincular cada ingrediente a un producto real de Super99/Riba Smith.</div>
-        <button data-action="saveNewRecipe" ${s.savingRecipe ? 'disabled' : ''} style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">${s.savingRecipe ? 'Guardando...' : 'Guardar receta'}</button>
+        ${!s.newRecipe.ingredientRows ? `
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:16px;">Ingredientes (uno por línea, ej: "200g pollo")
+            <textarea data-bind="newRecipe.ingredientsText" rows="5" placeholder="200g pollo&#10;1 taza arroz&#10;2 cdas aceite" style="padding:10px 12px;border-radius:10px;border:1px solid oklch(88% 0.02 85);font-size:14px;resize:vertical;">${esc(s.newRecipe.ingredientsText)}</textarea>
+          </label>
+          <div style="font-size:11px;color:oklch(55% 0.02 100);margin-bottom:12px;">Al revisar, vas a poder elegir por cada ingrediente si ya existe en tu catálogo o si hay que crear uno nuevo.</div>
+          <button data-action="reviewNewRecipeIngredients" style="background:oklch(68% 0.17 55);color:white;border:none;border-radius:10px;padding:10px 18px;font-weight:800;font-size:14px;cursor:pointer;">Revisar ingredientes</button>
+        ` : `
+          <div style="font-size:13px;font-weight:700;color:oklch(45% 0.02 100);margin-bottom:8px;">Para cada ingrediente, elegí si es uno que ya tenés en catálogo o si hay que crear uno nuevo:</div>
+          ${renderIngredientRowsEditor(s.newRecipe.ingredientRows, 'newRecipe', s.ingredients)}
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button data-action="saveNewRecipe" ${s.savingRecipe ? 'disabled' : ''} style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px 20px;font-weight:800;font-size:14px;cursor:pointer;">${s.savingRecipe ? 'Guardando...' : 'Guardar receta'}</button>
+            <button data-action="backToRawNewRecipe" style="background:oklch(94% 0.03 85);border:1px solid oklch(88% 0.02 85);border-radius:10px;padding:11px 18px;font-weight:700;font-size:14px;cursor:pointer;color:oklch(28% 0.03 145);">Volver a editar texto</button>
+          </div>
+        `}
       </div>
     ` : ''}
 
@@ -1165,7 +1333,14 @@ document.addEventListener('change', (e) => {
   const changeAction = el.getAttribute('data-change-action');
   if (!changeAction) return;
 
-  if (changeAction === 'linkRecipeIngredient') {
+  if (changeAction === 'setRowField') {
+    const formKey = el.getAttribute('data-form');
+    const idx = parseInt(el.getAttribute('data-idx'), 10);
+    const field = el.getAttribute('data-field');
+    const value = field === 'quantity' ? (el.value === '' ? null : parseFloat(el.value)) : el.value;
+    if (formKey === 'newRecipe') actions.setNewRecipeRowField(idx, field, value);
+    else if (formKey === 'importDraft') actions.setImportDraftRowField(idx, field, value);
+  } else if (changeAction === 'linkRecipeIngredient') {
     const recipeId = el.getAttribute('data-recipe-id');
     const recipeIngredientId = el.getAttribute('data-recipe-ingredient-id');
     const rawText = el.getAttribute('data-raw-text');
