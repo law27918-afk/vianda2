@@ -1,6 +1,6 @@
 # Vianda
 
-App de meal planning para 2-4 personas: objetivos → plan semanal → recetas → lista de compras derivada del plan (con el precio más barato entre Super99 y Riba Smith).
+App de meal planning para 2-5 personas: objetivos → plan semanal → recetas → lista de compras derivada del plan (con el precio más barato entre Super99 y Riba Smith).
 
 ## Arrancar
 
