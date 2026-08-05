@@ -102,12 +102,21 @@ def search_store_products(
 
     exclude_words = [_normalizar(w) for w in (exclude or "").split(",") if w.strip()]
 
-    candidatos = (
-        db.query(models.StoreProduct)
-        .filter(models.StoreProduct.name.ilike(f"%{palabras[0]}%"))
-        .limit(500)
-        .all()
-    )
+    # Se buscan candidatos por separado en cada tienda (en vez de un límite
+    # global sin orden) para que ninguna tienda quede eclipsada por otra si
+    # los productos están agrupados físicamente en la tabla (ej: por cómo se
+    # cargó el CSV). Sin esto, una búsqueda podía traer 500 candidatos casi
+    # todos de una sola tienda y nunca llegar a ver productos de la otra.
+    tiendas = [row[0] for row in db.query(models.StoreProduct.store).distinct().all()]
+    if not tiendas:
+        tiendas = [None]
+
+    candidatos = []
+    for tienda in tiendas:
+        query = db.query(models.StoreProduct).filter(models.StoreProduct.name.ilike(f"%{palabras[0]}%"))
+        if tienda is not None:
+            query = query.filter(models.StoreProduct.store == tienda)
+        candidatos.extend(query.limit(250).all())
 
     resultados = []
     for prod in candidatos:
