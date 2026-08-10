@@ -261,6 +261,7 @@ class StoreProductOut(BaseModel):
     price: float
     currency: str
     product_url: Optional[str] = None
+    image_url: Optional[str] = None
 
     class Config:
         from_attributes = True
