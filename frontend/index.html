@@ -24,7 +24,7 @@
 // ============================================================
 // CONFIG
 // ============================================================
-const API_BASE_URL = "https://vianda2.onrender.com";
+const API_BASE_URL = "https://vianda-backend-production-8057.up.railway.app";
 
 const MEAL_TYPES = [
   { key: 'desayuno', label: 'Desayuno', required: true },
@@ -834,7 +834,7 @@ function recipeIngredientRow(recipe, ri, catalogIngredientOptions, s) {
 }
 
 function productSearchPanel(ing, s) {
-  const results = s.productResults.map(p => ({ id: p.id, name: p.name, store: p.store, priceLabel: Number(p.price).toFixed(2) }));
+  const results = s.productResults.map(p => ({ id: p.id, name: p.name, store: p.store, priceLabel: Number(p.price).toFixed(2), imageUrl: p.image_url || null }));
   return `
     <div style="margin-top:8px;background:oklch(97% 0.018 85);border-radius:8px;padding:10px;">
       <div style="display:flex;gap:6px;margin-bottom:8px;">
@@ -843,7 +843,10 @@ function productSearchPanel(ing, s) {
       </div>
       ${ing.category || ing.exclude_keywords ? `<div style="font-size:10px;color:oklch(55% 0.02 100);margin-bottom:6px;">Filtro activo: ${ing.category ? `categoría "${esc(ing.category)}"` : ''}${ing.exclude_keywords ? ` · excluye "${esc(ing.exclude_keywords)}"` : ''} (editable en la pestaña Ingredientes)</div>` : ''}
       ${results.map(p => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid oklch(92% 0.015 85);font-size:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid oklch(92% 0.015 85);font-size:12px;">
+          ${p.imageUrl
+            ? `<img src="${esc(p.imageUrl)}" loading="lazy" onerror="this.style.display='none'" style="width:34px;height:34px;object-fit:contain;border-radius:6px;background:white;border:1px solid oklch(90% 0.02 85);flex-shrink:0;" />`
+            : `<div style="width:34px;height:34px;border-radius:6px;background:oklch(92% 0.015 85);flex-shrink:0;"></div>`}
           <div style="flex:1;">${esc(p.name)} <span style="color:oklch(55% 0.02 100);">(${esc(p.store)})</span></div>
           <div style="font-weight:800;margin:0 10px;">$${esc(p.priceLabel)}</div>
           <button data-action="linkProduct" data-ingredient-id="${esc(ing.id)}" data-product-id="${esc(p.id)}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:6px;padding:5px 10px;font-weight:700;font-size:11px;cursor:pointer;">Vincular</button>
@@ -1227,13 +1230,16 @@ function viewComparar() {
 
     ${sorted.length > 0 ? `
       <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:14px;overflow:hidden;">
-        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;padding:10px 16px;background:oklch(96% 0.02 85);font-weight:800;font-size:12px;color:oklch(45% 0.02 100);">
-          <div>Marca / producto</div><div>Tienda</div><div style="text-align:right;">Precio</div>
+        <div style="display:grid;grid-template-columns:48px 2fr 1fr 1fr;padding:10px 16px;background:oklch(96% 0.02 85);font-weight:800;font-size:12px;color:oklch(45% 0.02 100);align-items:center;">
+          <div></div><div>Marca / producto</div><div>Tienda</div><div style="text-align:right;">Precio</div>
         </div>
         ${sorted.map(p => {
           const isCheapest = p.price === cheapest;
           return `
-            <div style="display:grid;grid-template-columns:2fr 1fr 1fr;padding:10px 16px;border-top:1px solid oklch(94% 0.01 85);background:${isCheapest ? 'oklch(96% 0.03 152)' : 'transparent'};">
+            <div style="display:grid;grid-template-columns:48px 2fr 1fr 1fr;padding:10px 16px;border-top:1px solid oklch(94% 0.01 85);background:${isCheapest ? 'oklch(96% 0.03 152)' : 'transparent'};align-items:center;">
+              ${p.image_url
+                ? `<img src="${esc(p.image_url)}" loading="lazy" onerror="this.style.display='none'" style="width:36px;height:36px;object-fit:contain;border-radius:7px;background:white;border:1px solid oklch(90% 0.02 85);" />`
+                : `<div style="width:36px;height:36px;border-radius:7px;background:oklch(92% 0.015 85);"></div>`}
               <div style="font-size:13px;font-weight:600;">${esc(p.name)}</div>
               <div style="font-size:12px;font-weight:700;color:oklch(55% 0.02 100);">${esc(p.store)}</div>
               <div style="font-size:13px;font-weight:800;text-align:right;color:${isCheapest ? 'oklch(40% 0.13 152)' : 'oklch(28% 0.03 145)'};">$${Number(p.price).toFixed(2)}</div>
