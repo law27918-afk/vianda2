@@ -217,6 +217,13 @@ const state = {
   compareResults: [],
   comparing: false,
   compareSearched: false,
+
+  // Popup de detalle de un producto (click en cualquier fila de resultados).
+  // context: 'compare' (pestaña Comparar) o 'link' (panel de vincular producto).
+  productPopup: null, // { productId, context, ingredientId }
+  compareSelectedIds: [], // selección para comparar, contexto 'compare'
+  linkSelectedIds: [], // selección para comparar, contexto 'link'
+  showCompareModal: null, // 'compare' | 'link' | null
 };
 
 function setState(patch) {
@@ -345,13 +352,16 @@ const actions = {
       searchingIngredientId: s.searchingIngredientId === ingredientId ? null : ingredientId,
       productQuery: '',
       productResults: [],
+      linkSelectedIds: [],
+      productPopup: s.productPopup && s.productPopup.context === 'link' ? null : s.productPopup,
+      showCompareModal: s.showCompareModal === 'link' ? null : s.showCompareModal,
     }));
   },
 
   searchProducts: async () => {
     const q = state.productQuery.trim();
     if (!q) return;
-    setState({ searchingProducts: true });
+    setState({ searchingProducts: true, linkSelectedIds: [] });
     const ing = state.ingredients.find(i => i.id === state.searchingIngredientId);
     const exclude = ing && ing.exclude_keywords ? `&exclude=${encodeURIComponent(ing.exclude_keywords)}` : '';
     const catHint = ing && ing.category ? `&category_hint=${encodeURIComponent(ing.category)}` : '';
@@ -363,7 +373,7 @@ const actions = {
   runCompareSearch: async () => {
     const q = state.compareQuery.trim();
     if (!q) return;
-    setState({ comparing: true });
+    setState({ comparing: true, compareSelectedIds: [] });
     const r = await api(`/ingredients/products/search?q=${encodeURIComponent(q)}`);
     if (r.ok && Array.isArray(r.data)) {
       setState({ compareResults: r.data, compareSearched: true });
@@ -375,7 +385,7 @@ const actions = {
     const r = await api(`/ingredients/${ingredientId}/link/${storeProductId}`, { method: 'POST' });
     if (r.ok) {
       await loadIngredients();
-      setState({ productQuery: '', productResults: [] });
+      setState({ productQuery: '', productResults: [], productPopup: null, linkSelectedIds: [] });
     }
   },
 
@@ -383,6 +393,34 @@ const actions = {
     const r = await api(`/ingredients/${ingredientId}/link/${linkId}`, { method: 'DELETE' });
     if (r.ok) await loadIngredients();
   },
+
+  // -------- Popup de detalle de producto y comparación lado a lado --------
+  openProductPopup: (context, productId) => {
+    const ingredientId = context === 'link' ? state.searchingIngredientId : null;
+    setState({ productPopup: { productId, context, ingredientId } });
+  },
+  closeProductPopup: () => setState({ productPopup: null }),
+
+  toggleCompareSelect: (context, productId) => {
+    const key = context === 'compare' ? 'compareSelectedIds' : 'linkSelectedIds';
+    setState(s => {
+      const cur = s[key];
+      const has = cur.includes(productId);
+      let next;
+      if (has) next = cur.filter(id => id !== productId);
+      else if (cur.length >= 4) next = cur; // tope de 4 para que las tarjetas entren en pantalla
+      else next = [...cur, productId];
+      return { [key]: next };
+    });
+  },
+  clearCompareSelection: (context) => {
+    const key = context === 'compare' ? 'compareSelectedIds' : 'linkSelectedIds';
+    setState({ [key]: [] });
+  },
+  openCompareModal: (context) => setState({ showCompareModal: context }),
+  closeCompareModal: () => setState({ showCompareModal: null }),
+
+
 
   // -------- Hogar --------
   toggleEditHousehold: () => setState(s => ({ showHouseholdForm: !s.showHouseholdForm })),
@@ -833,8 +871,111 @@ function recipeIngredientRow(recipe, ri, catalogIngredientOptions, s) {
   `;
 }
 
+function findPopupProduct(s) {
+  if (!s.productPopup) return null;
+  const list = s.productPopup.context === 'compare' ? s.compareResults : s.productResults;
+  return list.find(p => p.id === s.productPopup.productId) || null;
+}
+
+function renderProductRow(p, context, s, opts) {
+  opts = opts || {};
+  const selectedIds = context === 'compare' ? s.compareSelectedIds : s.linkSelectedIds;
+  const isSelected = selectedIds.includes(p.id);
+  const priceLabel = Number(p.price).toFixed(2);
+  return `
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid oklch(92% 0.015 85);font-size:12px;${opts.rowStyle || ''}">
+      <input type="checkbox" ${isSelected ? 'checked' : ''} data-action="toggleCompareSelect" data-context="${context}" data-id="${esc(p.id)}" style="width:15px;height:15px;cursor:pointer;flex-shrink:0;" title="Seleccionar para comparar" />
+      <div data-action="openProductPopup" data-context="${context}" data-id="${esc(p.id)}" style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;min-width:0;">
+        ${p.image_url
+          ? `<img src="${esc(p.image_url)}" loading="lazy" onerror="this.style.display='none'" style="width:34px;height:34px;object-fit:contain;border-radius:6px;background:white;border:1px solid oklch(90% 0.02 85);flex-shrink:0;" />`
+          : `<div style="width:34px;height:34px;border-radius:6px;background:oklch(92% 0.015 85);flex-shrink:0;"></div>`}
+        <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name)} <span style="color:oklch(55% 0.02 100);">(${esc(p.store)})</span></div>
+        <div style="font-weight:800;white-space:nowrap;">$${esc(priceLabel)}</div>
+      </div>
+      ${opts.showLinkButton ? `<button data-action="linkProduct" data-ingredient-id="${esc(opts.ingredientId)}" data-product-id="${esc(p.id)}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:6px;padding:5px 10px;font-weight:700;font-size:11px;cursor:pointer;flex-shrink:0;">Vincular</button>` : ''}
+    </div>
+  `;
+}
+
+function renderCompareBar(context, s) {
+  const selectedIds = context === 'compare' ? s.compareSelectedIds : s.linkSelectedIds;
+  if (selectedIds.length === 0) return '';
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:oklch(94% 0.04 152);border:1px solid oklch(80% 0.08 152);border-radius:9px;padding:8px 12px;margin:8px 0;font-size:12px;">
+      <div style="font-weight:700;color:oklch(30% 0.08 152);">${selectedIds.length} seleccionado(s) para comparar${selectedIds.length >= 4 ? ' (máx. 4)' : ''}</div>
+      <div style="display:flex;gap:8px;">
+        <button data-action="openCompareModal" data-context="${context}" ${selectedIds.length < 2 ? 'disabled' : ''} style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:7px;padding:6px 12px;font-weight:800;font-size:11px;cursor:pointer;opacity:${selectedIds.length < 2 ? '0.5' : '1'};">Comparar (${selectedIds.length})</button>
+        <button data-action="clearCompareSelection" data-context="${context}" style="background:transparent;border:1px solid oklch(80% 0.08 152);color:oklch(40% 0.08 152);border-radius:7px;padding:6px 10px;font-weight:700;font-size:11px;cursor:pointer;">Limpiar</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderProductPopup(s) {
+  const p = findPopupProduct(s);
+  if (!p) return '';
+  const ctx = s.productPopup.context;
+  const showLink = ctx === 'link' && s.productPopup.ingredientId;
+  return `
+    <div data-action="closeProductPopup" style="position:fixed;inset:0;background:oklch(20% 0.01 100 / 0.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;">
+      <div onclick="event.stopPropagation()" style="background:white;border-radius:16px;max-width:380px;width:100%;overflow:hidden;">
+        <div style="display:flex;justify-content:flex-end;padding:10px 10px 0;">
+          <button data-action="closeProductPopup" style="background:none;border:none;font-size:20px;cursor:pointer;color:oklch(55% 0.02 100);line-height:1;padding:4px;">×</button>
+        </div>
+        <div style="padding:0 26px 26px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;">
+          ${p.image_url
+            ? `<img src="${esc(p.image_url)}" onerror="this.style.display='none'" style="width:160px;height:160px;object-fit:contain;background:oklch(97% 0.018 85);border-radius:12px;" />`
+            : `<div style="width:160px;height:160px;border-radius:12px;background:oklch(92% 0.015 85);"></div>`}
+          <div style="font-weight:800;font-size:16px;font-family:'Nunito',sans-serif;">${esc(p.name)}</div>
+          <div style="font-size:13px;color:oklch(55% 0.02 100);font-weight:700;">${esc(p.store)}${p.category ? ` · ${esc(p.category)}` : ''}</div>
+          <div style="font-size:24px;font-weight:900;color:oklch(48% 0.13 152);">$${Number(p.price).toFixed(2)}</div>
+          ${p.product_url ? `<a href="${esc(p.product_url)}" target="_blank" rel="noopener" style="font-size:12px;font-weight:700;">Ver en la tienda ↗</a>` : ''}
+          ${showLink ? `<button data-action="linkProduct" data-ingredient-id="${esc(s.productPopup.ingredientId)}" data-product-id="${esc(p.id)}" style="margin-top:6px;width:100%;background:oklch(48% 0.13 152);color:white;border:none;border-radius:10px;padding:11px;font-weight:800;font-size:14px;cursor:pointer;">Vincular este producto</button>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCompareModal(s) {
+  const context = s.showCompareModal;
+  if (!context) return '';
+  const selectedIds = context === 'compare' ? s.compareSelectedIds : s.linkSelectedIds;
+  const list = context === 'compare' ? s.compareResults : s.productResults;
+  const products = selectedIds.map(id => list.find(p => p.id === id)).filter(Boolean);
+  if (products.length === 0) return '';
+  const cheapest = Math.min(...products.map(p => p.price));
+  const showLink = context === 'link' && s.searchingIngredientId;
+  return `
+    <div data-action="closeCompareModal" style="position:fixed;inset:0;background:oklch(20% 0.01 100 / 0.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto;">
+      <div onclick="event.stopPropagation()" style="background:white;border-radius:16px;max-width:900px;width:100%;padding:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <div style="font-weight:800;font-size:16px;font-family:'Nunito',sans-serif;">Comparar productos</div>
+          <button data-action="closeCompareModal" style="background:none;border:none;font-size:20px;cursor:pointer;color:oklch(55% 0.02 100);line-height:1;padding:4px;">×</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(${products.length},1fr);gap:14px;">
+          ${products.map(p => {
+            const isCheapest = p.price === cheapest;
+            return `
+              <div style="border:1px solid ${isCheapest ? 'oklch(60% 0.13 152)' : 'oklch(90% 0.02 85)'};border-radius:12px;padding:14px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;background:${isCheapest ? 'oklch(97% 0.02 152)' : 'transparent'};">
+                ${isCheapest ? `<div style="background:oklch(48% 0.13 152);color:white;font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;">MÁS BARATO</div>` : ''}
+                ${p.image_url
+                  ? `<img src="${esc(p.image_url)}" onerror="this.style.display='none'" style="width:90px;height:90px;object-fit:contain;background:oklch(97% 0.018 85);border-radius:10px;" />`
+                  : `<div style="width:90px;height:90px;border-radius:10px;background:oklch(92% 0.015 85);"></div>`}
+                <div style="font-weight:700;font-size:12px;min-height:32px;">${esc(p.name)}</div>
+                <div style="font-size:11px;color:oklch(55% 0.02 100);font-weight:700;">${esc(p.store)}</div>
+                <div style="font-size:18px;font-weight:900;color:${isCheapest ? 'oklch(40% 0.13 152)' : 'oklch(28% 0.03 145)'};">$${Number(p.price).toFixed(2)}</div>
+                ${showLink ? `<button data-action="linkProduct" data-ingredient-id="${esc(s.searchingIngredientId)}" data-product-id="${esc(p.id)}" style="width:100%;background:oklch(48% 0.13 152);color:white;border:none;border-radius:8px;padding:8px;font-weight:800;font-size:12px;cursor:pointer;">Vincular</button>` : ''}
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function productSearchPanel(ing, s) {
-  const results = s.productResults.map(p => ({ id: p.id, name: p.name, store: p.store, priceLabel: Number(p.price).toFixed(2), imageUrl: p.image_url || null }));
   return `
     <div style="margin-top:8px;background:oklch(97% 0.018 85);border-radius:8px;padding:10px;">
       <div style="display:flex;gap:6px;margin-bottom:8px;">
@@ -842,16 +983,8 @@ function productSearchPanel(ing, s) {
         <button data-action="searchProducts" ${s.searchingProducts ? 'disabled' : ''} style="background:oklch(93% 0.02 85);border:1px solid oklch(85% 0.02 85);border-radius:7px;padding:7px 12px;font-weight:700;font-size:12px;cursor:pointer;">${s.searchingProducts ? '...' : 'Buscar'}</button>
       </div>
       ${ing.category || ing.exclude_keywords ? `<div style="font-size:10px;color:oklch(55% 0.02 100);margin-bottom:6px;">Filtro activo: ${ing.category ? `categoría "${esc(ing.category)}"` : ''}${ing.exclude_keywords ? ` · excluye "${esc(ing.exclude_keywords)}"` : ''} (editable en la pestaña Ingredientes)</div>` : ''}
-      ${results.map(p => `
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid oklch(92% 0.015 85);font-size:12px;">
-          ${p.imageUrl
-            ? `<img src="${esc(p.imageUrl)}" loading="lazy" onerror="this.style.display='none'" style="width:34px;height:34px;object-fit:contain;border-radius:6px;background:white;border:1px solid oklch(90% 0.02 85);flex-shrink:0;" />`
-            : `<div style="width:34px;height:34px;border-radius:6px;background:oklch(92% 0.015 85);flex-shrink:0;"></div>`}
-          <div style="flex:1;">${esc(p.name)} <span style="color:oklch(55% 0.02 100);">(${esc(p.store)})</span></div>
-          <div style="font-weight:800;margin:0 10px;">$${esc(p.priceLabel)}</div>
-          <button data-action="linkProduct" data-ingredient-id="${esc(ing.id)}" data-product-id="${esc(p.id)}" style="background:oklch(48% 0.13 152);color:white;border:none;border-radius:6px;padding:5px 10px;font-weight:700;font-size:11px;cursor:pointer;">Vincular</button>
-        </div>
-      `).join('')}
+      ${renderCompareBar('link', s)}
+      ${s.productResults.map(p => renderProductRow(p, 'link', s, { showLinkButton: true, ingredientId: ing.id })).join('')}
     </div>
   `;
 }
@@ -1229,23 +1362,9 @@ function viewComparar() {
     </div>
 
     ${sorted.length > 0 ? `
-      <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:14px;overflow:hidden;">
-        <div style="display:grid;grid-template-columns:48px 2fr 1fr 1fr;padding:10px 16px;background:oklch(96% 0.02 85);font-weight:800;font-size:12px;color:oklch(45% 0.02 100);align-items:center;">
-          <div></div><div>Marca / producto</div><div>Tienda</div><div style="text-align:right;">Precio</div>
-        </div>
-        ${sorted.map(p => {
-          const isCheapest = p.price === cheapest;
-          return `
-            <div style="display:grid;grid-template-columns:48px 2fr 1fr 1fr;padding:10px 16px;border-top:1px solid oklch(94% 0.01 85);background:${isCheapest ? 'oklch(96% 0.03 152)' : 'transparent'};align-items:center;">
-              ${p.image_url
-                ? `<img src="${esc(p.image_url)}" loading="lazy" onerror="this.style.display='none'" style="width:36px;height:36px;object-fit:contain;border-radius:7px;background:white;border:1px solid oklch(90% 0.02 85);" />`
-                : `<div style="width:36px;height:36px;border-radius:7px;background:oklch(92% 0.015 85);"></div>`}
-              <div style="font-size:13px;font-weight:600;">${esc(p.name)}</div>
-              <div style="font-size:12px;font-weight:700;color:oklch(55% 0.02 100);">${esc(p.store)}</div>
-              <div style="font-size:13px;font-weight:800;text-align:right;color:${isCheapest ? 'oklch(40% 0.13 152)' : 'oklch(28% 0.03 145)'};">$${Number(p.price).toFixed(2)}</div>
-            </div>
-          `;
-        }).join('')}
+      ${renderCompareBar('compare', s)}
+      <div style="background:oklch(99% 0.006 85);border:1px solid oklch(90% 0.02 85);border-radius:14px;padding:4px 16px;">
+        ${sorted.map(p => renderProductRow(p, 'compare', s)).join('')}
       </div>
     ` : ''}
     ${s.compareSearched && sorted.length === 0 ? `<div style="text-align:center;padding:50px 20px;color:oklch(55% 0.02 100);font-size:14px;">Sin resultados para "${esc(s.compareQuery)}".</div>` : ''}
@@ -1297,6 +1416,8 @@ function render() {
         ${mainHtml}
       </main>
     </div>
+    ${renderProductPopup(s)}
+    ${renderCompareModal(s)}
   `;
 }
 
@@ -1312,6 +1433,7 @@ document.addEventListener('click', (e) => {
   const mealkey = el.getAttribute('data-mealkey');
   const ingredientId = el.getAttribute('data-ingredient-id');
   const productId = el.getAttribute('data-product-id');
+  const context = el.getAttribute('data-context');
 
   switch (name) {
     case 'toggleIngredientSearch': actions.toggleIngredientSearch(id); break;
@@ -1322,6 +1444,12 @@ document.addEventListener('click', (e) => {
     case 'previewExternalRecipe': actions.previewExternalRecipe(id); break;
     case 'openSnackForm': actions.openSnackForm(day); break;
     case 'confirmAddSnack': actions.confirmAddSnack(day); break;
+    case 'openProductPopup': actions.openProductPopup(context, id); break;
+    case 'toggleCompareSelect': actions.toggleCompareSelect(context, id); break;
+    case 'openCompareModal': actions.openCompareModal(context); break;
+    case 'clearCompareSelection': actions.clearCompareSelection(context); break;
+    case 'closeProductPopup': actions.closeProductPopup(); break;
+    case 'closeCompareModal': actions.closeCompareModal(); break;
     default:
       if (actions[name]) actions[name]();
   }
