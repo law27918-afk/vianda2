@@ -118,7 +118,7 @@ def search_store_products(
             query = query.filter(models.StoreProduct.store == tienda)
         candidatos.extend(query.limit(250).all())
 
-    resultados = []
+    matches = []
     for prod in candidatos:
         nombre_norm = _normalizar(prod.name)
         nombre_tokens = set(re.split(r"\W+", nombre_norm))
@@ -131,16 +131,38 @@ def search_store_products(
         if any(ex and ex in nombre_norm for ex in exclude_words):
             continue
 
+        matches.append((prod, nombre_norm, nombre_tokens))
+
+    # Categoría dominante entre los resultados: el catálogo trae una
+    # categoría real por producto (ej. "despensa/arroz"), así que en vez de
+    # adivinar por el texto del nombre, contamos cuál categoría es la más
+    # común entre los productos que matchean la búsqueda. Para "arroz" eso
+    # da "despensa/arroz" (el arroz de verdad) muy por encima de
+    # "otros-departamentos/snacks" (galletas sabor arroz), y esa categoría
+    # se prioriza — así se filtran solos los productos que solo comparten
+    # la palabra pero son otra cosa.
+    conteo_categorias = {}
+    for prod, _, _ in matches:
+        if prod.category:
+            conteo_categorias[prod.category] = conteo_categorias.get(prod.category, 0) + 1
+    categoria_dominante = max(conteo_categorias, key=conteo_categorias.get) if conteo_categorias else None
+
+    resultados = []
+    for prod, nombre_norm, nombre_tokens in matches:
         # score de relevancia: coincide con la categoría sugerida primero,
+        # luego con la categoría dominante del catálogo para esta búsqueda,
         # luego cuántas palabras "extra" tiene el nombre además de las
         # buscadas (así "arroz" le gana a "arroz con leche", que tiene 2
-        # palabras extra, sin importar que el nombre completo sea más corto
-        # en caracteres que otra marca de arroz blanco), luego si el nombre
-        # arranca justo con la palabra buscada, luego precio.
+        # palabras extra), luego si el nombre arranca justo con la palabra
+        # buscada, luego precio.
         categoria_prioridad = 0 if category_hint and prod.category and prod.category.startswith(category_hint) else 1
+        categoria_dominante_match = 0 if categoria_dominante and prod.category == categoria_dominante else 1
         palabras_extra = len(nombre_tokens - set(palabras))
         no_arranca_con_query = 0 if nombre_norm.startswith(palabras[0]) else 1
-        resultados.append(((categoria_prioridad, palabras_extra, no_arranca_con_query, prod.price), prod))
+        resultados.append((
+            (categoria_prioridad, categoria_dominante_match, palabras_extra, no_arranca_con_query, prod.price),
+            prod,
+        ))
 
     resultados.sort(key=lambda t: t[0])
     return [prod for _, prod in resultados[:30]]
