@@ -132,9 +132,15 @@ def search_store_products(
             continue
 
         # score de relevancia: coincide con la categoría sugerida primero,
-        # luego nombre más corto (más específico/menos "ruido"), luego precio
+        # luego cuántas palabras "extra" tiene el nombre además de las
+        # buscadas (así "arroz" le gana a "arroz con leche", que tiene 2
+        # palabras extra, sin importar que el nombre completo sea más corto
+        # en caracteres que otra marca de arroz blanco), luego si el nombre
+        # arranca justo con la palabra buscada, luego precio.
         categoria_prioridad = 0 if category_hint and prod.category and prod.category.startswith(category_hint) else 1
-        resultados.append(((categoria_prioridad, len(nombre_norm), prod.price), prod))
+        palabras_extra = len(nombre_tokens - set(palabras))
+        no_arranca_con_query = 0 if nombre_norm.startswith(palabras[0]) else 1
+        resultados.append(((categoria_prioridad, palabras_extra, no_arranca_con_query, prod.price), prod))
 
     resultados.sort(key=lambda t: t[0])
     return [prod for _, prod in resultados[:30]]
